@@ -46,6 +46,8 @@ pub fn matches(event: &Value, event_type: &str, conditions: &[CompiledCondition]
             .exactly_one()
             .map(|node| match node {
                 Value::String(s) => s == &c.expected,
+                // clippy 제안(*other == c.expected)은 비문자열 Value에서 항상 false가 되므로 적용 금지
+                #[allow(clippy::cmp_owned)]
                 other => other.to_string() == c.expected,
             })
             .unwrap_or(false)
@@ -105,5 +107,12 @@ mod tests {
     #[test]
     fn json_path_str_errors_on_invalid_path() {
         assert!(json_path_str(&json!({}), "not a path").is_err());
+    }
+
+    #[test]
+    fn matches_non_string_condition_value() {
+        let e = serde_json::json!({"event_type": "t", "payload": {"n": 42}});
+        let conds = compile_conditions(&[("$.payload.n".to_string(), "42".to_string())]).unwrap();
+        assert!(matches(&e, "t", &conds));
     }
 }
