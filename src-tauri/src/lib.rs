@@ -6,6 +6,7 @@ pub mod keystone;
 pub mod matcher;
 pub mod models;
 pub mod mq;
+pub mod store;
 pub mod template;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
