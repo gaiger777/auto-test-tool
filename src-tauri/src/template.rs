@@ -1,10 +1,12 @@
 use crate::models::Vars;
 
+static VAR_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\{\{\s*([\w.]+)\s*\}\}").unwrap());
+
 /// 문자열 안의 {{var}} 를 vars 값으로 치환한다. 미정의 변수는 에러.
 pub fn render(input: &str, vars: &Vars) -> Result<String, String> {
-    let re = regex::Regex::new(r"\{\{\s*([\w.]+)\s*\}\}").unwrap();
     let mut missing: Option<String> = None;
-    let out = re
+    let out = VAR_RE
         .replace_all(input, |caps: &regex::Captures| {
             let key = &caps[1];
             match vars.get(key) {
