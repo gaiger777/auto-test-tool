@@ -23,6 +23,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db = store::Store::open(&dir.join("data.sqlite"))
                 .map_err(std::io::Error::other)?;
+            let _ = db.mark_interrupted_runs(&chrono::Utc::now().to_rfc3339());
             app.manage(AppState {
                 db: Mutex::new(db),
                 active_runs: Mutex::new(Default::default()),

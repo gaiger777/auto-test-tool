@@ -261,6 +261,16 @@ impl Store {
         Ok(())
     }
 
+    /// 앱 시작 시 호출: 이전 세션에서 'running'으로 남은 좀비 run을 interrupted로 정리한다.
+    pub fn mark_interrupted_runs(&self, finished_at: &str) -> Result<usize, String> {
+        self.conn
+            .execute(
+                "UPDATE runs SET status='interrupted', finished_at=?1 WHERE status='running'",
+                params![finished_at],
+            )
+            .map_err(|e| e.to_string())
+    }
+
     pub fn list_runs(&self) -> Result<Vec<RunRecord>, String> {
         let mut stmt = self
             .conn
@@ -426,5 +436,25 @@ mod tests {
 
         store.delete_scenario(sid).unwrap();
         assert_eq!(store.list_runs().unwrap()[0].scenario_name, "(삭제됨)");
+    }
+
+    #[test]
+    fn marks_zombie_running_runs_as_interrupted() {
+        let store = Store::open_in_memory().unwrap();
+        let sid = store
+            .save_scenario(&ScenarioRecord {
+                id: None,
+                name: "s".into(),
+                description: String::new(),
+                steps_json: "[]".into(),
+            })
+            .unwrap();
+        store.create_run(sid, 1, "2026-07-06T00:00:00Z").unwrap();
+
+        let n = store.mark_interrupted_runs("2026-07-06T00:02:00Z").unwrap();
+        assert_eq!(n, 1);
+        let runs = store.list_runs().unwrap();
+        assert_eq!(runs[0].status, "interrupted");
+        assert_eq!(runs[0].finished_at.as_deref(), Some("2026-07-06T00:02:00Z"));
     }
 }

@@ -148,7 +148,10 @@ pub async fn run_scenario(
         description: scenario_rec.description,
         steps,
     };
-    let password = store::get_password(env_id)?;
+    // OS 키체인은 사용자 승인 모달로 무기한 블록될 수 있어 블로킹 워커에서 격리
+    let password = tauri::async_runtime::spawn_blocking(move || store::get_password(env_id))
+        .await
+        .map_err(|e| format!("키체인 조회 태스크 실패: {e}"))??;
 
     // 1) Keystone 토큰 (실패 시 실행 자체를 시작하지 않음)
     let ks = Arc::new(KeystoneClient::new(
@@ -225,7 +228,9 @@ pub async fn run_scenario(
                     duration_ms: o.duration_ms as i64,
                 });
             }
-            let _ = db.finish_run(run_id, status, &now());
+            if let Err(e) = db.finish_run(run_id, status, &now()) {
+                eprintln!("[commands] run {run_id} 종료 기록 실패: {e}");
+            }
         }
         state.active_runs.lock().unwrap().remove(&run_id);
         cancel.cancel(); // MQ 소비자 태스크 종료
