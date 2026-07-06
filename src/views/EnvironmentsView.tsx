@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import * as api from '../api'
 import type { Environment } from '../types'
 
+type StringField = { [K in keyof Environment]: Environment[K] extends string ? K : never }[keyof Environment]
+
 const empty: Environment = {
   id: null, name: '', keystone_url: '', user_name: '', user_domain: 'Default',
   project_name: '', project_domain: 'Default', mq_url: '', mq_exchanges: 'nova,neutron,cinder',
@@ -40,7 +42,17 @@ export default function EnvironmentsView() {
     } catch (e) { setError(String(e)) }
   }
 
-  const field = (key: keyof Environment, label: string, placeholder = '') => (
+  const remove = (env: Environment) => {
+    if (!window.confirm(`환경 "${env.name}"을(를) 삭제할까요? 키체인의 비밀번호도 함께 삭제됩니다.`)) return
+    api.deleteEnvironment(env.id!)
+      .then(() => {
+        if (form.id === env.id) edit(empty)
+        reload()
+      })
+      .catch(e => setError(String(e)))
+  }
+
+  const field = (key: StringField, label: string, placeholder = '') => (
     <label className="field">{label}
       <input value={String(form[key] ?? '')} placeholder={placeholder}
         onChange={e => setForm({ ...form, [key]: e.target.value })} />
@@ -55,7 +67,7 @@ export default function EnvironmentsView() {
           {envs.map(env => (
             <li key={env.id}>
               <button onClick={() => edit(env)}>{env.name}</button>
-              <button className="danger" onClick={() => api.deleteEnvironment(env.id!).then(reload)}>삭제</button>
+              <button className="danger" onClick={() => remove(env)}>삭제</button>
             </li>
           ))}
         </ul>
