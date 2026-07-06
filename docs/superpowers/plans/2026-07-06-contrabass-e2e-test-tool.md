@@ -993,6 +993,9 @@ pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
         .expect("reqwest client 생성 실패");
     let mut outcomes = Vec::new();
     let mut aborted = false; // 실패 또는 취소 발생 여부
+    // cleanup 스텝은 취소된 상태에서도 끝까지 실행되어야 하므로, 이미 취소된 토큰 대신
+    // 절대 취소되지 않는 토큰을 넘긴다 (자연 타임아웃으로만 종료).
+    let never_cancelled = CancellationToken::new();
 
     for (i, step) in scenario.steps.iter().enumerate() {
         if cancel.is_cancelled() {
@@ -1013,7 +1016,8 @@ pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
 
         sink.step_started(i, &step.name);
         let started = std::time::Instant::now();
-        let result = execute_action(&step.action, &mut vars, &client, &bus, &cancel, &token_refresher).await;
+        let step_cancel = if step.cleanup { &never_cancelled } else { &cancel };
+        let result = execute_action(&step.action, &mut vars, &client, &bus, step_cancel, &token_refresher).await;
         let duration_ms = started.elapsed().as_millis() as u64;
 
         let o = match result {
