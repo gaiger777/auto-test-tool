@@ -1,4 +1,5 @@
 pub mod assertion;
+pub mod commands;
 pub mod engine;
 pub mod events;
 pub mod http;
@@ -9,17 +10,39 @@ pub mod mq;
 pub mod store;
 pub mod template;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
+use commands::AppState;
+use std::sync::Mutex;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let db = store::Store::open(&dir.join("data.sqlite"))
+                .map_err(std::io::Error::other)?;
+            app.manage(AppState {
+                db: Mutex::new(db),
+                active_runs: Mutex::new(Default::default()),
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::list_environments,
+            commands::save_environment,
+            commands::delete_environment,
+            commands::list_scenarios,
+            commands::save_scenario,
+            commands::delete_scenario,
+            commands::export_scenario,
+            commands::import_scenario,
+            commands::list_runs,
+            commands::list_step_results,
+            commands::run_scenario,
+            commands::cancel_run
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
