@@ -1,3 +1,4 @@
+pub mod assertion;
 pub mod models;
 pub mod template;
 
