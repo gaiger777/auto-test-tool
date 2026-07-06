@@ -1015,7 +1015,8 @@ pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
             Ok(detail) => StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Passed, detail, duration_ms },
             Err(e) => {
                 aborted = true;
-                StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Failed, detail: e, duration_ms }
+                // 실패 메시지에 대용량 응답/캡처값이 섞여도 UI/DB가 넘치지 않게 한 곳에서 자른다
+                StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Failed, detail: truncate(&e, 2000), duration_ms }
             }
         };
         sink.step_finished(&o);
@@ -1075,8 +1076,10 @@ async fn execute_action(
             for c in conditions {
                 conds.push((c.json_path.clone(), render(&c.equals, vars)?));
             }
+            // 스텝 시작 시 1회 파싱 — JSONPath 오타가 타임아웃이 아니라 즉시 실패로 드러난다
+            let compiled = matcher::compile_conditions(&conds)?;
             let event = tokio::select! {
-                r = bus.wait_for(move |e| matcher::matches(e, &et, &conds), Duration::from_secs(*timeout_secs)) => r?,
+                r = bus.wait_for(move |e| matcher::matches(e, &et, &compiled), Duration::from_secs(*timeout_secs)) => r?,
                 _ = cancel.cancelled() => return Err("취소됨".into()),
             };
             Ok(truncate(&event.to_string(), 2000))
