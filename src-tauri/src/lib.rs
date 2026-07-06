@@ -1,6 +1,7 @@
 pub mod assertion;
 pub mod events;
 pub mod http;
+pub mod keystone;
 pub mod matcher;
 pub mod models;
 pub mod template;
