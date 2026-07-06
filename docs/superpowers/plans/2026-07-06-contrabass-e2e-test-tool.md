@@ -985,7 +985,12 @@ pub struct RunInput {
 
 pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
     let RunInput { scenario, mut vars, bus, cancel, token_refresher } = input;
-    let client = reqwest::Client::new();
+    // 설계 문서의 "HTTP 요청 타임아웃 존재" — 개별 API 호출은 30초 안에 응답해야 한다.
+    // (장시간 대기는 http_call이 아니라 wait_event의 몫)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest client 생성 실패");
     let mut outcomes = Vec::new();
     let mut aborted = false; // 실패 또는 취소 발생 여부
 
