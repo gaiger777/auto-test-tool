@@ -25,25 +25,27 @@ export interface Environment {
 
 export interface ScenarioRecord { id: number | null; name: string; description: string; steps_json: string }
 
+export type RunStatus = 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted'
+
 export interface RunRecord {
   id: number
   scenario_id: number
   scenario_name: string
   env_id: number
-  status: string
+  status: RunStatus
   started_at: string
   finished_at: string | null
 }
+
+export type StepStatus = 'passed' | 'failed' | 'skipped'
 
 export interface StepResultRecord {
   run_id: number
   step_index: number
   name: string
-  status: string
+  status: StepStatus
   detail: string
   duration_ms: number
 }
-
-export type StepStatus = 'passed' | 'failed' | 'skipped'
 
 export interface StepOutcome { index: number; name: string; status: StepStatus; detail: string; duration_ms: number }

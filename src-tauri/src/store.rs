@@ -30,7 +30,7 @@ pub struct RunRecord {
     pub scenario_id: i64,
     pub scenario_name: String,
     pub env_id: i64,
-    pub status: String, // running | passed | failed | cancelled
+    pub status: String, // running | passed | failed | cancelled | interrupted
     pub started_at: String,
     pub finished_at: Option<String>,
 }
