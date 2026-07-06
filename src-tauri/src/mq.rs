@@ -13,9 +13,13 @@ pub async fn start_consumer(
     bus: Arc<EventBus>,
     cancel: CancellationToken,
 ) -> Result<(), String> {
-    let conn = Connection::connect(mq_url, ConnectionProperties::default())
-        .await
-        .map_err(|e| format!("RabbitMQ 접속 실패: {e}"))?;
+    let conn = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        Connection::connect(mq_url, ConnectionProperties::default()),
+    )
+    .await
+    .map_err(|_| "RabbitMQ 접속 타임아웃 (10초)".to_string())?
+    .map_err(|e| format!("RabbitMQ 접속 실패: {e}"))?;
     let channel = conn.create_channel().await.map_err(|e| format!("채널 생성 실패: {e}"))?;
 
     let queue = channel
@@ -42,6 +46,7 @@ pub async fn start_consumer(
             .queue_bind(
                 queue.name().as_str().into(),
                 ex.as_str().into(),
+                // oslo.messaging 기본 notification_topics("notifications") 가정 — 커스텀 토픽 배포는 v2에서 설정화
                 "notifications.#".into(),
                 QueueBindOptions::default(),
                 FieldTable::default(),
@@ -65,9 +70,10 @@ pub async fn start_consumer(
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 delivery = consumer.next() => {
-                    let Some(Ok(delivery)) = delivery else { break };
-                    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&delivery.data) {
-                        bus.publish(unwrap_oslo(value));
+                    match delivery {
+                        Some(Ok(delivery)) => handle_delivery(&delivery.data, &bus),
+                        Some(Err(e)) => { eprintln!("[mq] 소비 에러로 종료: {e}"); break; }
+                        None => { eprintln!("[mq] 스트림 종료 (연결 끊김)"); break; }
                     }
                 }
             }
@@ -75,6 +81,14 @@ pub async fn start_consumer(
         let _ = conn.close(200, "done".into()).await;
     });
     Ok(())
+}
+
+/// 수신 바이트를 파싱·언랩해 버스에 싣는다. 파싱 실패는 버리되 stderr에 남긴다.
+fn handle_delivery(data: &[u8], bus: &EventBus) {
+    match serde_json::from_slice::<serde_json::Value>(data) {
+        Ok(value) => bus.publish(unwrap_oslo(value)),
+        Err(e) => eprintln!("[mq] notification JSON 파싱 실패 (버림): {e}"),
+    }
 }
 
 /// oslo 봉투 언랩: {"oslo.version": "2.0", "oslo.message": "<JSON 문자열>"} → 내부 메시지
@@ -112,5 +126,29 @@ mod tests {
     fn passes_through_broken_envelope() {
         let broken = json!({"oslo.message": "not json"});
         assert_eq!(unwrap_oslo(broken.clone()), broken);
+    }
+
+    #[tokio::test]
+    async fn handle_delivery_publishes_parsed_event() {
+        let bus = EventBus::new();
+        handle_delivery(br#"{"event_type":"compute.instance.create.end"}"#, &bus);
+        let got = bus
+            .wait_for(
+                |e| e["event_type"] == "compute.instance.create.end",
+                std::time::Duration::from_millis(50),
+            )
+            .await
+            .unwrap();
+        assert_eq!(got["event_type"], "compute.instance.create.end");
+    }
+
+    #[tokio::test]
+    async fn handle_delivery_drops_broken_json() {
+        let bus = EventBus::new();
+        handle_delivery(b"not json at all", &bus);
+        let err = bus
+            .wait_for(|_| true, std::time::Duration::from_millis(50))
+            .await;
+        assert!(err.is_err());
     }
 }
