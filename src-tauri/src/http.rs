@@ -8,6 +8,7 @@ pub struct HttpResult {
     pub body: String,
 }
 
+/// HTTP 요청을 실행하고 상태코드와 바디를 돌려준다.
 pub async fn execute(
     client: &reqwest::Client,
     method: &str,
@@ -22,7 +23,12 @@ pub async fn execute(
         req = req.header(k, v);
     }
     if let Some(b) = body {
-        req = req.header("Content-Type", "application/json").body(b.to_string());
+        // 사용자가 헤더로 Content-Type을 지정했으면 기본값(JSON)을 덮어쓰지 않는다
+        let has_content_type = headers.keys().any(|k| k.eq_ignore_ascii_case("content-type"));
+        if !has_content_type {
+            req = req.header("Content-Type", "application/json");
+        }
+        req = req.body(b.to_string());
     }
     let resp = req.send().await.map_err(|e| format!("HTTP 요청 실패: {e}"))?;
     let status = resp.status().as_u16();
@@ -69,6 +75,33 @@ mod tests {
             .unwrap();
         assert_eq!(res.status, 202);
         assert!(res.body.contains("abc-123"));
+    }
+
+    #[tokio::test]
+    async fn respects_user_content_type() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/x"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let headers = HashMap::from([(
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        )]);
+        let res = execute(&client, "POST", &format!("{}/x", server.uri()), &headers, Some("a=1"))
+            .await
+            .unwrap();
+        assert_eq!(res.status, 200);
+
+        // 중복 헤더가 실리지 않았는지 실제 수신 요청으로 검증
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let values: Vec<_> = requests[0].headers.get_all("content-type").iter().collect();
+        assert_eq!(values.len(), 1, "Content-Type 헤더가 정확히 1개여야 함");
+        assert_eq!(values[0], "application/x-www-form-urlencoded");
     }
 
     #[tokio::test]
