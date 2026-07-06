@@ -141,6 +141,13 @@ impl Store {
         let rows = stmt
             .query_map([], |r| {
                 let endpoints_json: String = r.get(9)?;
+                let endpoints = serde_json::from_str(&endpoints_json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        9,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
                 Ok(Environment {
                     id: Some(r.get(0)?),
                     name: r.get(1)?,
@@ -151,7 +158,7 @@ impl Store {
                     project_domain: r.get(6)?,
                     mq_url: r.get(7)?,
                     mq_exchanges: r.get(8)?,
-                    endpoints: serde_json::from_str(&endpoints_json).unwrap_or_default(),
+                    endpoints,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -329,7 +336,9 @@ pub fn get_password(env_id: i64) -> Result<String, String> {
 
 pub fn delete_password(env_id: i64) {
     if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, &format!("env-{env_id}")) {
-        let _ = e.delete_credential();
+        if let Err(err) = e.delete_credential() {
+            eprintln!("[store] 키체인 항목 삭제 실패 (env-{env_id}): {err}");
+        }
     }
 }
 
@@ -414,5 +423,8 @@ mod tests {
         let results = store.list_step_results(run_id).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].duration_ms, 42);
+
+        store.delete_scenario(sid).unwrap();
+        assert_eq!(store.list_runs().unwrap()[0].scenario_name, "(삭제됨)");
     }
 }
