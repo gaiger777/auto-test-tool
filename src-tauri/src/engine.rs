@@ -84,7 +84,7 @@ pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
         let duration_ms = started.elapsed().as_millis() as u64;
 
         let o = match result {
-            Ok(detail) => StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Passed, detail, duration_ms },
+            Ok(detail) => StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Passed, detail: truncate(&detail, 2000), duration_ms },
             Err(e) => {
                 aborted = true;
                 // 실패 메시지에 대용량 응답/캡처값이 섞여도 UI/DB가 넘치지 않게 한 곳에서 자른다
@@ -124,7 +124,8 @@ async fn execute_action(
                 };
 
                 // 401이면 토큰 1회 재발급 후 재시도
-                if res.status == 401 && attempt == 0 {
+                // 401을 기대하는 음성 테스트면 재발급하지 않는다
+                if res.status == 401 && attempt == 0 && *expect_status != Some(401) {
                     if let Some(refresher) = token_refresher {
                         let new_token = refresher().await?;
                         vars.insert("auth_token".into(), new_token);
@@ -185,7 +186,10 @@ mod tests {
     use super::*;
     use crate::models::{AssertOp, StepDef};
     use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     struct NullSink;
     impl ProgressSink for NullSink {
@@ -294,6 +298,99 @@ mod tests {
         let outcomes = run(inp, &NullSink).await;
         assert_eq!(outcomes[0].status, StepStatus::Skipped);
         assert_eq!(outcomes[1].status, StepStatus::Passed);
+    }
+
+    /// 호출 횟수를 세면서 고정 결과를 돌려주는 TokenRefresher.
+    fn counting_refresher(
+        counter: Arc<AtomicUsize>,
+        result: Result<String, String>,
+    ) -> TokenRefresher {
+        Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let r = result.clone();
+            Box::pin(async move { r })
+        })
+    }
+
+    fn http_step(url: String, expect_status: Option<u16>) -> StepDef {
+        step(
+            "call",
+            false,
+            Action::HttpCall {
+                method: "GET".into(),
+                url,
+                headers: HashMap::from([(
+                    "X-Auth-Token".to_string(),
+                    "{{auth_token}}".to_string(),
+                )]),
+                body: None,
+                expect_status,
+                captures: vec![],
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn retries_401_with_refreshed_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/servers"))
+            .and(header("X-Auth-Token", "old"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/servers"))
+            .and(header("X-Auth-Token", "new"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut inp = input(vec![http_step(format!("{}/servers", server.uri()), Some(200))]);
+        inp.vars.insert("auth_token".into(), "old".into());
+        inp.token_refresher = Some(counting_refresher(calls.clone(), Ok("new".into())));
+
+        let outcomes = run(inp, &NullSink).await;
+        assert_eq!(outcomes[0].status, StepStatus::Passed);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_fails_step() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut inp = input(vec![http_step(format!("{}/servers", server.uri()), Some(200))]);
+        inp.vars.insert("auth_token".into(), "old".into());
+        inp.token_refresher = Some(counting_refresher(calls.clone(), Err("재발급 실패".into())));
+
+        let outcomes = run(inp, &NullSink).await;
+        assert_eq!(outcomes[0].status, StepStatus::Failed);
+        assert!(outcomes[0].detail.contains("재발급 실패"));
+        assert_eq!(calls.load(Ordering::SeqCst), 1); // 무한루프 없음
+    }
+
+    #[tokio::test]
+    async fn expected_401_skips_refresh() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut inp = input(vec![http_step(format!("{}/servers", server.uri()), Some(401))]);
+        inp.vars.insert("auth_token".into(), "old".into());
+        inp.token_refresher = Some(counting_refresher(calls.clone(), Ok("new".into())));
+
+        let outcomes = run(inp, &NullSink).await;
+        assert_eq!(outcomes[0].status, StepStatus::Passed);
+        assert_eq!(calls.load(Ordering::SeqCst), 0); // 의도된 401이면 재발급하지 않는다
     }
 
     #[tokio::test]
