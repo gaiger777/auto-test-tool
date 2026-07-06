@@ -34,6 +34,7 @@ mod tests {
     #[test]
     fn regex_works_and_rejects_bad_pattern() {
         assert!(check("abc-123", &AssertOp::Regex, "^[a-z]+-\\d+$").is_ok());
+        assert!(check("abc", &AssertOp::Regex, "^\\d+$").is_err());
         assert!(check("abc", &AssertOp::Regex, "[").is_err());
     }
 }
