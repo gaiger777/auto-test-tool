@@ -6,10 +6,10 @@ import RunView from './views/RunView'
 import ScenarioBuilder from './views/ScenarioBuilder'
 
 const tabs = [
-  { key: 'run', label: '실행', el: <RunView /> },
-  { key: 'scenarios', label: '시나리오', el: <ScenarioBuilder /> },
-  { key: 'envs', label: '환경', el: <EnvironmentsView /> },
-  { key: 'history', label: '히스토리', el: <HistoryView /> },
+  { key: 'run', label: '실행' },
+  { key: 'scenarios', label: '시나리오' },
+  { key: 'envs', label: '환경' },
+  { key: 'history', label: '히스토리' },
 ] as const
 
 export default function App() {
@@ -23,7 +23,12 @@ export default function App() {
           </button>
         ))}
       </nav>
-      {tabs.find(t => t.key === tab)?.el}
+      <div style={{ display: tab === 'run' ? undefined : 'none' }}>
+        <RunView active={tab === 'run'} />
+      </div>
+      {tab === 'scenarios' && <ScenarioBuilder />}
+      {tab === 'envs' && <EnvironmentsView />}
+      {tab === 'history' && <HistoryView />}
     </main>
   )
 }
