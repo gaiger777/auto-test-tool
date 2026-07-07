@@ -233,6 +233,7 @@ impl CaptureSink for EventSink {
 struct ServerCtx {
     token: String,
     sink: Box<dyn CaptureSink>,
+    seq: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Deserialize)]
@@ -246,7 +247,10 @@ async fn capture_handler(
     body: String,
 ) -> axum::http::StatusCode {
     match parse_capture(&ctx.token, &q.token, &body) {
-        Ok(call) => {
+        Ok(mut call) => {
+            // 페이지 재탐색으로 스크립트 seq가 리셋돼도 충돌하지 않도록 세션 단조 id로 덮어쓴다
+            let n = ctx.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            call.id = format!("s{n}");
             ctx.sink.emit(call);
             axum::http::StatusCode::OK
         }
@@ -266,7 +270,7 @@ pub async fn start(
         .map_err(|e| format!("수집 서버 바인딩 실패: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
-    let ctx = Arc::new(ServerCtx { token, sink });
+    let ctx = Arc::new(ServerCtx { token, sink, seq: std::sync::atomic::AtomicU64::new(0) });
     let router = axum::Router::new()
         .route("/capture", axum::routing::post(capture_handler))
         .with_state(ctx);
@@ -364,9 +368,11 @@ pub fn hook_script(port: u16, token: &str) -> String {
     format!(
         r#"(function() {{
   var ENDPOINT = "http://127.0.0.1:{port}/capture?token={token}";
+  var origFetch = window.fetch;
   var seq = 0;
+  // 캡처 POST는 원본 fetch로 보낸다 — 몽키패치된 fetch로 보내면 자기 자신이 다시 캡처돼 무한 재귀가 된다.
   function send(call) {{
-    try {{ fetch(ENDPOINT, {{ method: "POST", body: JSON.stringify(call), keepalive: true }}).catch(function(){{}}); }} catch (e) {{}}
+    try {{ origFetch.call(window, ENDPOINT, {{ method: "POST", body: JSON.stringify(call), keepalive: true }}).catch(function(){{}}); }} catch (e) {{}}
   }}
   function truncate(s) {{ return (typeof s === "string" && s.length > 8192) ? s.slice(0, 8192) : s; }}
   function headersToObj(h) {{
@@ -375,14 +381,15 @@ pub fn hook_script(port: u16, token: &str) -> String {
     return o;
   }}
 
-  var origFetch = window.fetch;
   window.fetch = function(input, init) {{
     var req;
     try {{ req = new Request(input, init); }} catch (e) {{ return origFetch.apply(this, arguments); }}
     var reqHeaders = headersToObj(req.headers);
     var id = "c" + (++seq);
-    var bodyPromise = init && init.body != null ? Promise.resolve(String(init.body)) : Promise.resolve(null);
-    return origFetch.apply(this, arguments).then(function(resp) {{
+    // Request 객체에 실린 body도 잡히도록 req.clone()에서 읽는다 (init.body만 보면 놓침). GET은 ""→null.
+    var bodyPromise = req.clone().text().then(function(t) {{ return t && t.length ? t : null; }}).catch(function() {{ return null; }});
+    // 원본 arguments 대신 정규화된 req를 넘겨 Request-first 스타일의 body 이중소비를 피한다.
+    return origFetch.call(this, req).then(function(resp) {{
       try {{
         var clone = resp.clone();
         Promise.all([bodyPromise, clone.text().catch(function(){{ return null; }})]).then(function(arr) {{
@@ -409,11 +416,15 @@ pub fn hook_script(port: u16, token: &str) -> String {
     var self = this;
     if (self.__cap) {{
       self.addEventListener("loadend", function() {{
-        var abs;
-        try {{ abs = new URL(self.__cap.url, location.href).href; }} catch (e) {{ abs = self.__cap.url; }}
-        send({{ id: "c" + (++seq), method: self.__cap.method, url: abs, request_headers: self.__cap.headers,
-                request_body: body != null ? String(body) : null, status: self.status,
-                response_body: truncate(typeof self.responseText === "string" ? self.responseText : null), timestamp: Date.now() }});
+        try {{
+          var abs;
+          try {{ abs = new URL(self.__cap.url, location.href).href; }} catch (e) {{ abs = self.__cap.url; }}
+          // responseType이 text/''가 아니면 responseText 접근 자체가 예외를 던지므로 먼저 걸러낸다.
+          var rt = (self.responseType === "" || self.responseType === "text") ? self.responseText : null;
+          send({{ id: "c" + (++seq), method: self.__cap.method, url: abs, request_headers: self.__cap.headers,
+                  request_body: body != null ? String(body) : null, status: self.status,
+                  response_body: truncate(rt), timestamp: Date.now() }});
+        }} catch (e) {{}}
       }});
     }}
     return XS.apply(this, arguments);
@@ -423,14 +434,14 @@ pub fn hook_script(port: u16, token: &str) -> String {
 }
 
 /// 대상 URL을 캡처 웹뷰 창("capture")으로 열고 후킹 스크립트를 주입한다.
-pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<(), String> {
+pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::WebviewWindow, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
-    WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
+    let window = WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
         .title("캡처 세션")
         .initialization_script(&script)
         .build()
         .map_err(|e| format!("캡처 창 생성 실패: {e}"))?;
-    Ok(())
+    Ok(window)
 }
 
 #[cfg(test)]
@@ -501,6 +512,7 @@ pub struct AppState {
 }
 
 pub struct CaptureHandle {
+    pub id: String,
     pub cancel: CancellationToken,
 }
 ```
@@ -512,7 +524,9 @@ pub struct CaptureHandle {
 ```rust
 // --- 캡처 세션 ---
 
-/// 세션 시작을 위한 비암호학적 토큰 생성 (localhost 한정, 우발적 끼어들기 방지 수준).
+/// 세션 시작을 위한 비암호학적 토큰 생성 (nanos 기반이라 예측·재현 가능).
+/// 위협모델은 localhost 한정 우발적 끼어들기 방지 수준이며, 로컬 악성 프로세스 방어가
+/// 필요해지면 CSPRNG로 교체할 것.
 fn generate_capture_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -527,35 +541,64 @@ pub async fn start_capture_session(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<u16, String> {
-    if state.capture.lock().unwrap().is_some() {
-        return Err("이미 캡처 세션이 진행 중입니다".into());
-    }
     let token = generate_capture_token();
     let cancel = CancellationToken::new();
+    // 체크 + 슬롯 선점을 원자적으로 — await 구간 동안 동시 start를 막는다 (label 유일성에 비의존)
+    {
+        let mut guard = state.capture.lock().unwrap();
+        if guard.is_some() {
+            return Err("이미 캡처 세션이 진행 중입니다".into());
+        }
+        *guard = Some(CaptureHandle { id: token.clone(), cancel: cancel.clone() });
+    }
+    // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
+    if let Some(win) = app.get_webview_window("capture") {
+        let _ = win.close();
+    }
+
     let sink = Box::new(EventSink { app: app.clone() });
-    let port = capture_server::start(token.clone(), sink, cancel.clone()).await?;
+    let port = match capture_server::start(token.clone(), sink, cancel.clone()).await {
+        Ok(p) => p,
+        Err(e) => {
+            // 우리 예약이 아직 남아있으면 되돌린다 (좀비 방지)
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            cancel.cancel();
+            return Err(e);
+        }
+    };
 
     let script = capture_session::hook_script(port, &token);
-    if let Err(e) = capture_session::open_capture_window(&app, &url, script) {
-        cancel.cancel(); // 창 생성 실패 시 서버 정리 (좀비 방지)
-        return Err(e);
-    }
+    let window = match capture_session::open_capture_window(&app, &url, script) {
+        Ok(w) => w,
+        Err(e) => {
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            cancel.cancel();
+            return Err(e);
+        }
+    };
 
-    *state.capture.lock().unwrap() = Some(CaptureHandle { cancel });
-
-    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림
-    if let Some(window) = app.get_webview_window("capture") {
-        let app_close = app.clone();
-        window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                let st = app_close.state::<AppState>();
-                if let Some(h) = st.capture.lock().unwrap().take() {
+    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림 (슬롯의 세션이 자기 세션일 때만)
+    let app_close = app.clone();
+    let my_id = token.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            let st = app_close.state::<AppState>();
+            let mut guard = st.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
+                if let Some(h) = guard.take() {
                     h.cancel.cancel();
                 }
+                drop(guard);
                 let _ = app_close.emit("capture-session-ended", ());
             }
-        });
-    }
+        }
+    });
     Ok(port)
 }
 
@@ -593,6 +636,23 @@ pub fn capture_session_active(state: State<AppState>) -> Result<bool, String> {
                 active_runs: Mutex::new(Default::default()),
                 capture: Mutex::new(None),
             });
+            // 메인 창을 닫으면 활성 캡처 세션(서버·창)을 함께 정리 — 유령 세션 방지
+            if let Some(main) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                        let st = app_handle.state::<AppState>();
+                        // 락을 먼저 놓고 창을 닫아 캡처 창 Destroyed 핸들러와 재진입 데드락 회피
+                        let handle = st.capture.lock().unwrap().take();
+                        if let Some(h) = handle {
+                            h.cancel.cancel();
+                        }
+                        if let Some(w) = app_handle.get_webview_window("capture") {
+                            let _ = w.close();
+                        }
+                    }
+                });
+            }
 ```
 
 `generate_handler!` 목록의 `commands::cancel_run` 뒤에 콤마와 3개 추가:
@@ -611,7 +671,7 @@ Run:
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
-Expected: 기존 46 + capture 8 = 54개 PASS, clippy 경고 0
+Expected: 58개 PASS (기존 + capture 서버/스크립트/토큰 테스트), clippy 경고 0
 
 - [ ] **Step 6: 커밋**
 
@@ -685,18 +745,20 @@ export default function CaptureView() {
   }
 
   const stop = async () => {
-    await api.stopCaptureSession().catch(e => setError(String(e)))
-    setActive(false)
-    if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
-      setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
-    }
+    try {
+      await api.stopCaptureSession()
+      setActive(false)
+      if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
+        setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
+      }
+    } catch (e) { setError(String(e)) }
   }
 
   const toggle = (id: string) => setSelected(s => ({ ...s, [id]: !s[id] }))
 
   const addToScenario = async () => {
     setError(''); setNotice('')
-    const chosen = calls.filter(c => selected[c.id])
+    const chosen = calls.filter(c => selected[c.id]).reverse() // 목록은 최신순, 스텝은 캡처 시간순
     if (chosen.length === 0) { setError('추가할 호출을 선택하세요'); return }
     const steps = capturesToSteps(chosen, tokenHeader)
     const rec: ScenarioRecord = {
@@ -790,8 +852,10 @@ export default function App() {
       <div style={{ display: tab === 'run' ? undefined : 'none' }}>
         <RunView active={tab === 'run'} />
       </div>
+      <div style={{ display: tab === 'capture' ? undefined : 'none' }}>
+        <CaptureView />
+      </div>
       {tab === 'scenarios' && <ScenarioBuilder />}
-      {tab === 'capture' && <CaptureView />}
       {tab === 'envs' && <EnvironmentsView />}
       {tab === 'history' && <HistoryView />}
     </main>

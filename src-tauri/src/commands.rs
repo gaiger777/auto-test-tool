@@ -1,3 +1,5 @@
+use crate::capture_server::{self, EventSink};
+use crate::capture_session;
 use crate::engine::{self, ProgressSink, RunInput, StepOutcome, StepStatus, TokenRefresher};
 use crate::events::EventBus;
 use crate::keystone::{KeystoneAuth, KeystoneClient};
@@ -12,6 +14,12 @@ use tokio_util::sync::CancellationToken;
 pub struct AppState {
     pub db: Mutex<Store>,
     pub active_runs: Mutex<HashMap<i64, CancellationToken>>,
+    pub capture: Mutex<Option<CaptureHandle>>,
+}
+
+pub struct CaptureHandle {
+    pub id: String,
+    pub cancel: CancellationToken,
 }
 
 fn now() -> String {
@@ -247,5 +255,116 @@ pub fn cancel_run(state: State<AppState>, run_id: i64) -> Result<(), String> {
             Ok(())
         }
         None => Err(format!("실행 {run_id}은(는) 진행 중이 아님")),
+    }
+}
+
+// --- 캡처 세션 ---
+
+/// 세션 시작을 위한 비암호학적 토큰 생성 (nanos 기반이라 예측·재현 가능).
+/// 위협모델은 localhost 한정 우발적 끼어들기 방지 수준이며, 로컬 악성 프로세스 방어가
+/// 필요해지면 CSPRNG로 교체할 것.
+fn generate_capture_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("cap-{nanos:x}")
+}
+
+#[tauri::command]
+pub async fn start_capture_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<u16, String> {
+    let token = generate_capture_token();
+    let cancel = CancellationToken::new();
+    // 체크 + 슬롯 선점을 원자적으로 — await 구간 동안 동시 start를 막는다 (label 유일성에 의존하지 않음)
+    {
+        let mut guard = state.capture.lock().unwrap();
+        if guard.is_some() {
+            return Err("이미 캡처 세션이 진행 중입니다".into());
+        }
+        *guard = Some(CaptureHandle { id: token.clone(), cancel: cancel.clone() });
+    }
+    // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
+    if let Some(win) = app.get_webview_window("capture") {
+        let _ = win.close();
+    }
+
+    let sink = Box::new(EventSink { app: app.clone() });
+    let port = match capture_server::start(token.clone(), sink, cancel.clone()).await {
+        Ok(p) => p,
+        Err(e) => {
+            // 우리 예약이 아직 남아있으면 되돌린다
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            cancel.cancel();
+            return Err(e);
+        }
+    };
+
+    let script = capture_session::hook_script(port, &token);
+    let window = match capture_session::open_capture_window(&app, &url, script) {
+        Ok(w) => w,
+        Err(e) => {
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            cancel.cancel();
+            return Err(e);
+        }
+    };
+
+    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림 (자기 세션일 때만)
+    let app_close = app.clone();
+    let my_id = token.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            let st = app_close.state::<AppState>();
+            let mut guard = st.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
+                if let Some(h) = guard.take() {
+                    h.cancel.cancel();
+                }
+                drop(guard);
+                let _ = app_close.emit("capture-session-ended", ());
+            }
+        }
+    });
+    Ok(port)
+}
+
+#[tauri::command]
+pub fn stop_capture_session(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    // 락을 먼저 놓고 창을 닫아 Destroyed 핸들러와의 재진입 데드락을 피한다
+    let handle = state.capture.lock().unwrap().take();
+    if let Some(h) = handle {
+        h.cancel.cancel();
+    }
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.close();
+    }
+    let _ = app.emit("capture-session-ended", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn capture_session_active(state: State<AppState>) -> Result<bool, String> {
+    Ok(state.capture.lock().unwrap().is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_token_has_prefix_and_nonempty() {
+        let t = generate_capture_token();
+        assert!(t.starts_with("cap-"));
+        assert!(t.len() > 4);
     }
 }
