@@ -1,5 +1,6 @@
 pub mod assertion;
 pub mod capture_server;
+pub mod capture_session;
 pub mod commands;
 pub mod engine;
 pub mod events;
