@@ -32,4 +32,16 @@ describe('presets', () => {
       expect(p.expand(input).length).toBeGreaterThan(0)
     }
   })
+
+  it('모든 wait_event는 리소스를 특정하는 {{변수}} 조건을 가진다', () => {
+    for (const p of presets) {
+      const input = Object.fromEntries(p.fields.map(f => [f.key, 'x']))
+      for (const s of p.expand(input)) {
+        if (s.type === 'wait_event') {
+          expect(s.conditions?.length ?? 0).toBeGreaterThan(0)
+          expect(s.conditions!.some(c => c.equals.includes('{{'))).toBe(true)
+        }
+      }
+    }
+  })
 })

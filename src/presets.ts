@@ -61,7 +61,7 @@ export const presets: Preset[] = [
           name: '인스턴스 삭제 완료 대기', cleanup: true, type: 'wait_event',
           event_type: 'compute.instance.delete.end',
           conditions: [{ json_path: '$.payload.instance_id', equals: `{{${v}}}` }],
-          timeout_secs: 300,
+          timeout_secs: 120,
         },
       ]
     },
@@ -130,7 +130,7 @@ export const presets: Preset[] = [
           name: '볼륨 삭제 완료 대기', cleanup: true, type: 'wait_event',
           event_type: 'volume.delete.end',
           conditions: [{ json_path: '$.payload.volume_id', equals: `{{${v}}}` }],
-          timeout_secs: 300,
+          timeout_secs: 120,
         },
       ]
     },

@@ -21,13 +21,25 @@ export default function ScenarioBuilder() {
   const [presetId, setPresetId] = useState(presets[0].id)
   const [presetInput, setPresetInput] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
+  const [dirty, setDirty] = useState(false)
 
   const reload = () => api.listScenarios().then(setScenarios).catch(e => setError(String(e)))
   useEffect(() => { reload() }, [])
 
-  const edit = (rec: ScenarioRecord) => {
+  const changeSteps = (next: StepDef[]) => {
+    setSteps(next)
+    setDirty(true)
+  }
+
+  const applyEdit = (rec: ScenarioRecord) => {
     setCurrent(rec)
     setSteps(JSON.parse(rec.steps_json))
+    setDirty(false)
+  }
+
+  const edit = (rec: ScenarioRecord) => {
+    if (dirty && !window.confirm('저장하지 않은 변경이 있습니다. 버리고 이동할까요?')) return
+    applyEdit(rec)
   }
 
   const newScenario = () => edit({ id: null, name: '', description: '', steps_json: '[]' })
@@ -37,6 +49,7 @@ export default function ScenarioBuilder() {
     try {
       const id = await api.saveScenario({ ...current, steps_json: JSON.stringify(steps) })
       setCurrent({ ...current, id })
+      setDirty(false)
       reload()
     } catch (e) { setError(String(e)) }
   }
@@ -46,12 +59,12 @@ export default function ScenarioBuilder() {
     if (j < 0 || j >= steps.length) return
     const next = [...steps]
     ;[next[i], next[j]] = [next[j], next[i]]
-    setSteps(next)
+    changeSteps(next)
   }
 
   const addPreset = () => {
     const preset = presets.find(p => p.id === presetId)!
-    setSteps([...steps, ...preset.expand(presetInput)])
+    changeSteps([...steps, ...preset.expand(presetInput)])
     setPresetInput({})
   }
 
@@ -59,13 +72,14 @@ export default function ScenarioBuilder() {
     if (!window.confirm(`시나리오 "${s.name}"을(를) 삭제할까요?`)) return
     api.deleteScenario(s.id!)
       .then(() => {
-        if (current.id === s.id) newScenario()
+        if (current.id === s.id) applyEdit({ id: null, name: '', description: '', steps_json: '[]' })
         reload()
       })
       .catch(e => setError(String(e)))
   }
 
   const doExport = async () => {
+    if (dirty) { setError('저장하지 않은 변경이 있습니다. 먼저 저장하세요.'); return }
     if (current.id == null) { setError('먼저 저장하세요'); return }
     const path = await save({ defaultPath: `${current.name || 'scenario'}.json` })
     if (path) await api.exportScenario(current.id, path).catch(e => setError(String(e)))
@@ -99,10 +113,10 @@ export default function ScenarioBuilder() {
       <div>
         <h2>{current.id ? '시나리오 편집' : '새 시나리오'}</h2>
         <label className="field">이름
-          <input value={current.name} onChange={e => setCurrent({ ...current, name: e.target.value })} />
+          <input value={current.name} onChange={e => { setCurrent({ ...current, name: e.target.value }); setDirty(true) }} />
         </label>
         <label className="field">설명
-          <input value={current.description} onChange={e => setCurrent({ ...current, description: e.target.value })} />
+          <input value={current.description} onChange={e => { setCurrent({ ...current, description: e.target.value }); setDirty(true) }} />
         </label>
 
         <h3>스텝 ({steps.length})</h3>
@@ -113,17 +127,17 @@ export default function ScenarioBuilder() {
               <span className="step-actions">
                 <button onClick={e => { e.preventDefault(); move(i, -1) }}>↑</button>
                 <button onClick={e => { e.preventDefault(); move(i, 1) }}>↓</button>
-                <button className="danger" onClick={e => { e.preventDefault(); setSteps(steps.filter((_, j) => j !== i)) }}>삭제</button>
+                <button className="danger" onClick={e => { e.preventDefault(); changeSteps(steps.filter((_, j) => j !== i)) }}>삭제</button>
               </span>
             </summary>
-            <StepForm step={s} onChange={ns => setSteps(steps.map((old, j) => (j === i ? ns : old)))} />
+            <StepForm step={s} onChange={ns => changeSteps(steps.map((old, j) => (j === i ? ns : old)))} />
           </details>
         ))}
 
         <h3>스텝 추가</h3>
         <div className="add-row">
           {(['http_call', 'wait_event', 'assert', 'sleep'] as const).map(t => (
-            <button key={t} onClick={() => setSteps([...steps, blankStep(t)])}>+ {t}</button>
+            <button key={t} onClick={() => changeSteps([...steps, blankStep(t)])}>+ {t}</button>
           ))}
         </div>
         <div className="add-row">

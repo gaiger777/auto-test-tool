@@ -1,8 +1,35 @@
-import type { AssertOp, StepDef } from '../types'
+import { useState } from 'react'
+import type { AssertOp, Capture, Condition, StepDef } from '../types'
 
 interface Props {
   step: StepDef
   onChange: (s: StepDef) => void
+}
+
+function JsonField(props: {
+  label: string
+  rows: number
+  placeholder?: string
+  initial: unknown
+  onCommit: (parsed: unknown) => void
+}) {
+  const [text, setText] = useState(() => JSON.stringify(props.initial))
+  const [invalid, setInvalid] = useState(false)
+  return (
+    <label className="field">{props.label}
+      <textarea rows={props.rows} value={text} placeholder={props.placeholder}
+        onChange={e => setText(e.target.value)}
+        onBlur={() => {
+          try {
+            props.onCommit(JSON.parse(text))
+            setInvalid(false)
+          } catch {
+            setInvalid(true)
+          }
+        }} />
+      {invalid && <span className="error">JSON이 유효하지 않습니다 — 마지막 유효값이 유지됩니다</span>}
+    </label>
+  )
 }
 
 export default function StepForm({ step, onChange }: Props) {
@@ -35,10 +62,8 @@ export default function StepForm({ step, onChange }: Props) {
             <input value={step.url} onChange={e => set({ url: e.target.value })}
               placeholder="{{base_url.nova}}/servers" />
           </label>
-          <label className="field">헤더 (JSON)
-            <textarea rows={2} value={JSON.stringify(step.headers ?? {})}
-              onChange={e => { try { set({ headers: JSON.parse(e.target.value) }) } catch { /* 입력 중 무시 */ } }} />
-          </label>
+          <JsonField label="헤더 (JSON)" rows={2} initial={step.headers ?? {}}
+            onCommit={v => set({ headers: v as Record<string, string> })} />
           <label className="field">바디
             <textarea rows={4} value={step.body ?? ''} onChange={e => set({ body: e.target.value || null })} />
           </label>
@@ -46,11 +71,9 @@ export default function StepForm({ step, onChange }: Props) {
             <input value={step.expect_status ?? ''} placeholder="예: 202 (비우면 검사 안 함)"
               onChange={e => set({ expect_status: e.target.value ? Number(e.target.value) : null })} />
           </label>
-          <label className="field">변수 캡처 (JSON 배열)
-            <textarea rows={2} value={JSON.stringify(step.captures ?? [])}
-              placeholder='[{"var":"server_id","json_path":"$.server.id"}]'
-              onChange={e => { try { set({ captures: JSON.parse(e.target.value) }) } catch { /* 입력 중 무시 */ } }} />
-          </label>
+          <JsonField label="변수 캡처 (JSON 배열)" rows={2} initial={step.captures ?? []}
+            placeholder='[{"var":"server_id","json_path":"$.server.id"}]'
+            onCommit={v => set({ captures: v as Capture[] })} />
         </div>
       )
     case 'wait_event':
@@ -61,11 +84,9 @@ export default function StepForm({ step, onChange }: Props) {
             <input value={step.event_type} placeholder="compute.instance.create.end"
               onChange={e => set({ event_type: e.target.value })} />
           </label>
-          <label className="field">조건 (JSON 배열)
-            <textarea rows={2} value={JSON.stringify(step.conditions ?? [])}
-              placeholder='[{"json_path":"$.payload.instance_id","equals":"{{server_id}}"}]'
-              onChange={e => { try { set({ conditions: JSON.parse(e.target.value) }) } catch { /* 입력 중 무시 */ } }} />
-          </label>
+          <JsonField label="조건 (JSON 배열)" rows={2} initial={step.conditions ?? []}
+            placeholder='[{"json_path":"$.payload.instance_id","equals":"{{server_id}}"}]'
+            onCommit={v => set({ conditions: v as Condition[] })} />
           <label className="field">타임아웃(초)
             <input value={step.timeout_secs} onChange={e => set({ timeout_secs: Number(e.target.value) || 0 })} />
           </label>
