@@ -19,6 +19,6 @@ export const runScenario = (scenarioId: number, envId: number) =>
   invoke<number>('run_scenario', { scenarioId, envId })
 export const cancelRun = (runId: number) => invoke<void>('cancel_run', { runId })
 
-export const startCaptureSession = (url: string) => invoke<number>('start_capture_session', { url })
+export const startCaptureSession = (url: string) => invoke<void>('start_capture_session', { url })
 export const stopCaptureSession = () => invoke<void>('stop_capture_session')
 export const captureSessionActive = () => invoke<boolean>('capture_session_active')

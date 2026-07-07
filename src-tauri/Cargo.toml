@@ -32,7 +32,6 @@ tokio-util = "0.7.18"
 futures-util = "0.3.32"
 chrono = "0.4.45"
 tauri-plugin-dialog = "2.7.1"
-axum = "0.8.9"
 
 [dev-dependencies]
 wiremock = "0.6.5"

@@ -5,6 +5,21 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "dialog:default"
+    "dialog:default",
+    "allow-list-environments",
+    "allow-save-environment",
+    "allow-delete-environment",
+    "allow-list-scenarios",
+    "allow-save-scenario",
+    "allow-delete-scenario",
+    "allow-export-scenario",
+    "allow-import-scenario",
+    "allow-list-runs",
+    "allow-list-step-results",
+    "allow-run-scenario",
+    "allow-cancel-run",
+    "allow-start-capture-session",
+    "allow-stop-capture-session",
+    "allow-capture-session-active"
   ]
 }
