@@ -1,0 +1,22 @@
+main { max-width: 1100px; margin: 0 auto; padding: 1rem; font-family: system-ui, sans-serif; }
+.tabs { display: flex; gap: 0.5rem; border-bottom: 1px solid #ccc; margin-bottom: 1rem; }
+.tabs button { border: none; background: none; padding: 0.5rem 1rem; cursor: pointer; }
+.tabs button.active { border-bottom: 2px solid #396cd8; font-weight: bold; }
+.two-col { display: grid; grid-template-columns: 260px 1fr; gap: 1.5rem; align-items: start; }
+.field { display: block; margin-bottom: 0.5rem; }
+.field input, .field select, .field textarea { display: block; width: 100%; box-sizing: border-box; padding: 0.3rem; }
+.check { display: block; margin-bottom: 0.5rem; }
+.list { list-style: none; padding: 0; }
+.list li { display: flex; gap: 0.4rem; margin-bottom: 0.3rem; }
+.error { color: #c00; }
+.dim { color: #888; }
+.danger { color: #c00; }
+.step { border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.4rem; padding: 0.3rem; }
+.step summary { cursor: pointer; }
+.step-actions { float: right; display: inline-flex; gap: 0.3rem; }
+.step-form { padding: 0.5rem; }
+.add-row { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; align-items: center; }
+.run-steps li { margin-bottom: 0.5rem; }
+.detail { background: #f6f6f6; padding: 0.4rem; max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 0.8rem; }
+table.history { border-collapse: collapse; width: 100%; }
+table.history th, table.history td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; }

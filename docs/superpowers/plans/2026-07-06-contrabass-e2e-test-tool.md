@@ -985,9 +985,17 @@ pub struct RunInput {
 
 pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
     let RunInput { scenario, mut vars, bus, cancel, token_refresher } = input;
-    let client = reqwest::Client::new();
+    // 설계 문서의 "HTTP 요청 타임아웃 존재" — 개별 API 호출은 30초 안에 응답해야 한다.
+    // (장시간 대기는 http_call이 아니라 wait_event의 몫)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest client 생성 실패");
     let mut outcomes = Vec::new();
     let mut aborted = false; // 실패 또는 취소 발생 여부
+    // cleanup 스텝은 취소된 상태에서도 끝까지 실행되어야 하므로, 이미 취소된 토큰 대신
+    // 절대 취소되지 않는 토큰을 넘긴다 (자연 타임아웃으로만 종료).
+    let never_cancelled = CancellationToken::new();
 
     for (i, step) in scenario.steps.iter().enumerate() {
         if cancel.is_cancelled() {
@@ -1008,14 +1016,16 @@ pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
 
         sink.step_started(i, &step.name);
         let started = std::time::Instant::now();
-        let result = execute_action(&step.action, &mut vars, &client, &bus, &cancel, &token_refresher).await;
+        let step_cancel = if step.cleanup { &never_cancelled } else { &cancel };
+        let result = execute_action(&step.action, &mut vars, &client, &bus, step_cancel, &token_refresher).await;
         let duration_ms = started.elapsed().as_millis() as u64;
 
         let o = match result {
             Ok(detail) => StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Passed, detail, duration_ms },
             Err(e) => {
                 aborted = true;
-                StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Failed, detail: e, duration_ms }
+                // 실패 메시지에 대용량 응답/캡처값이 섞여도 UI/DB가 넘치지 않게 한 곳에서 자른다
+                StepOutcome { index: i, name: step.name.clone(), status: StepStatus::Failed, detail: truncate(&e, 2000), duration_ms }
             }
         };
         sink.step_finished(&o);
@@ -1075,8 +1085,10 @@ async fn execute_action(
             for c in conditions {
                 conds.push((c.json_path.clone(), render(&c.equals, vars)?));
             }
+            // 스텝 시작 시 1회 파싱 — JSONPath 오타가 타임아웃이 아니라 즉시 실패로 드러난다
+            let compiled = matcher::compile_conditions(&conds)?;
             let event = tokio::select! {
-                r = bus.wait_for(move |e| matcher::matches(e, &et, &conds), Duration::from_secs(*timeout_secs)) => r?,
+                r = bus.wait_for(move |e| matcher::matches(e, &et, &compiled), Duration::from_secs(*timeout_secs)) => r?,
                 _ = cancel.cancelled() => return Err("취소됨".into()),
             };
             Ok(truncate(&event.to_string(), 2000))
@@ -2517,7 +2529,7 @@ export const presets: Preset[] = [
           name: '인스턴스 삭제 완료 대기', cleanup: true, type: 'wait_event',
           event_type: 'compute.instance.delete.end',
           conditions: [{ json_path: '$.payload.instance_id', equals: `{{${v}}}` }],
-          timeout_secs: 300,
+          timeout_secs: 120,
         },
       ]
     },
@@ -2586,7 +2598,7 @@ export const presets: Preset[] = [
           name: '볼륨 삭제 완료 대기', cleanup: true, type: 'wait_event',
           event_type: 'volume.delete.end',
           conditions: [{ json_path: '$.payload.volume_id', equals: `{{${v}}}` }],
-          timeout_secs: 300,
+          timeout_secs: 120,
         },
       ]
     },
@@ -2870,6 +2882,11 @@ git add -A && git commit -m "feat: 시나리오 빌더 및 OpenStack 프리셋"
 ---
 
 ### Task 16: 실행 화면 + 앱 조립 (RunView.tsx, App.tsx)
+
+> **구현 반영 노트**: 아래 RunView 코드의 `runIdRef` 필터에는 스타트업 레이스가 있다
+> (invoke 응답이 도착하기 전에 백엔드가 emit한 이벤트가 버려짐). 실제 구현은
+> `pendingRef` + `isCurrentRun()` 채택 방식으로 수정됨 — 커밋 db2991e 참조.
+> 이 화면은 동시에 실행을 하나만 시작하므로 "대기 중 첫 이벤트가 run_id를 채택"이 안전하다.
 
 **Files:**
 - Create: `src/views/RunView.tsx`
