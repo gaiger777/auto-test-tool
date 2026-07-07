@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AssertOp, Capture, Condition, StepDef } from '../types'
 
 interface Props {
@@ -13,8 +13,15 @@ function JsonField(props: {
   initial: unknown
   onCommit: (parsed: unknown) => void
 }) {
-  const [text, setText] = useState(() => JSON.stringify(props.initial))
+  const serialized = JSON.stringify(props.initial)
+  const [text, setText] = useState(serialized)
   const [invalid, setInvalid] = useState(false)
+  // 스텝 이동/삭제로 같은 위치에 다른 스텝이 오면 (initial 변경) 텍스트를 재동기화한다.
+  // 타이핑 중에는 initial이 안 변하므로 (blur 커밋 전) 입력이 끊기지 않는다.
+  useEffect(() => {
+    setText(serialized)
+    setInvalid(false)
+  }, [serialized])
   return (
     <label className="field">{props.label}
       <textarea rows={props.rows} value={text} placeholder={props.placeholder}
