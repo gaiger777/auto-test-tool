@@ -51,4 +51,11 @@ describe('capturesToSteps', () => {
     const steps = capturesToSteps([call({ id: 'a', method: 'GET' }), call({ id: 'b', method: 'DELETE' })], 'X-Auth-Token')
     expect(steps.map(s => (s.type === 'http_call' ? s.method : ''))).toEqual(['GET', 'DELETE'])
   })
+
+  it('URL 파싱 실패 시 원본 문자열을 이름 경로로 쓴다', () => {
+    const [step] = capturesToSteps([call({ url: 'not a url' })], 'X-Auth-Token')
+    expect(step.name).toBe('POST not a url')
+    if (step.type !== 'http_call') throw new Error('타입 불일치')
+    expect(step.url).toBe('not a url')
+  })
 })
