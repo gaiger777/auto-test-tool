@@ -29,6 +29,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(db),
                 active_runs: Mutex::new(Default::default()),
+                capture: Mutex::new(None),
             });
             Ok(())
         })
@@ -44,7 +45,10 @@ pub fn run() {
             commands::list_runs,
             commands::list_step_results,
             commands::run_scenario,
-            commands::cancel_run
+            commands::cancel_run,
+            commands::start_capture_session,
+            commands::stop_capture_session,
+            commands::capture_session_active
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,3 +1,5 @@
+use crate::capture_server::{self, EventSink};
+use crate::capture_session;
 use crate::engine::{self, ProgressSink, RunInput, StepOutcome, StepStatus, TokenRefresher};
 use crate::events::EventBus;
 use crate::keystone::{KeystoneAuth, KeystoneClient};
@@ -12,6 +14,11 @@ use tokio_util::sync::CancellationToken;
 pub struct AppState {
     pub db: Mutex<Store>,
     pub active_runs: Mutex<HashMap<i64, CancellationToken>>,
+    pub capture: Mutex<Option<CaptureHandle>>,
+}
+
+pub struct CaptureHandle {
+    pub cancel: CancellationToken,
 }
 
 fn now() -> String {
@@ -248,4 +255,76 @@ pub fn cancel_run(state: State<AppState>, run_id: i64) -> Result<(), String> {
         }
         None => Err(format!("실행 {run_id}은(는) 진행 중이 아님")),
     }
+}
+
+// --- 캡처 세션 ---
+
+/// 세션 시작을 위한 비암호학적 토큰 생성 (localhost 한정, 우발적 끼어들기 방지 수준).
+fn generate_capture_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("cap-{nanos:x}")
+}
+
+#[tauri::command]
+pub async fn start_capture_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<u16, String> {
+    if state.capture.lock().unwrap().is_some() {
+        return Err("이미 캡처 세션이 진행 중입니다".into());
+    }
+    // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
+    if let Some(win) = app.get_webview_window("capture") {
+        let _ = win.close();
+    }
+    let token = generate_capture_token();
+    let cancel = CancellationToken::new();
+    let sink = Box::new(EventSink { app: app.clone() });
+    let port = capture_server::start(token.clone(), sink, cancel.clone()).await?;
+
+    let script = capture_session::hook_script(port, &token);
+    if let Err(e) = capture_session::open_capture_window(&app, &url, script) {
+        cancel.cancel(); // 창 생성 실패 시 서버 정리 (좀비 방지)
+        return Err(e);
+    }
+
+    *state.capture.lock().unwrap() = Some(CaptureHandle { cancel });
+
+    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림
+    if let Some(window) = app.get_webview_window("capture") {
+        let app_close = app.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let st = app_close.state::<AppState>();
+                if let Some(h) = st.capture.lock().unwrap().take() {
+                    h.cancel.cancel();
+                }
+                let _ = app_close.emit("capture-session-ended", ());
+            }
+        });
+    }
+    Ok(port)
+}
+
+#[tauri::command]
+pub fn stop_capture_session(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    // 락을 먼저 놓고 창을 닫아 Destroyed 핸들러와의 재진입 데드락을 피한다
+    let handle = state.capture.lock().unwrap().take();
+    if let Some(h) = handle {
+        h.cancel.cancel();
+    }
+    if let Some(window) = app.get_webview_window("capture") {
+        let _ = window.close();
+    }
+    let _ = app.emit("capture-session-ended", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn capture_session_active(state: State<AppState>) -> Result<bool, String> {
+    Ok(state.capture.lock().unwrap().is_some())
 }
