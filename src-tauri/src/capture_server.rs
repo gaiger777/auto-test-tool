@@ -17,6 +17,7 @@ pub struct CapturedCall {
 
 /// 토큰을 검증하고 바디를 CapturedCall로 파싱한다. 토큰 불일치/잘못된 JSON은 Err.
 pub fn parse_capture(expected_token: &str, got_token: &str, body: &str) -> Result<CapturedCall, String> {
+    // 타이밍 비세이프 비교는 의도적: 위협모델은 로컬 우발적 접근 차단 수준
     if got_token != expected_token || expected_token.is_empty() {
         return Err("토큰 불일치".into());
     }
@@ -58,7 +59,10 @@ async fn capture_handler(
             ctx.sink.emit(call);
             axum::http::StatusCode::OK
         }
-        Err(_) => axum::http::StatusCode::BAD_REQUEST,
+        Err(e) => {
+            eprintln!("[capture_server] 캡처 거부: {e}");
+            axum::http::StatusCode::BAD_REQUEST
+        }
     }
 }
 
@@ -77,12 +81,16 @@ pub async fn start(
     let ctx = Arc::new(ServerCtx { token, sink });
     let router = axum::Router::new()
         .route("/capture", axum::routing::post(capture_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
         .with_state(ctx);
 
     tauri::async_runtime::spawn(async move {
-        let _ = axum::serve(listener, router)
+        if let Err(e) = axum::serve(listener, router)
             .with_graceful_shutdown(async move { cancel.cancelled().await })
-            .await;
+            .await
+        {
+            eprintln!("[capture_server] 서버 종료: {e}");
+        }
     });
     Ok(port)
 }
