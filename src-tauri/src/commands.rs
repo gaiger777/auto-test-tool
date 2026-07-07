@@ -18,6 +18,7 @@ pub struct AppState {
 }
 
 pub struct CaptureHandle {
+    pub id: String,
     pub cancel: CancellationToken,
 }
 
@@ -292,18 +293,25 @@ pub async fn start_capture_session(
         return Err(e);
     }
 
-    *state.capture.lock().unwrap() = Some(CaptureHandle { cancel });
+    *state.capture.lock().unwrap() = Some(CaptureHandle { id: token.clone(), cancel });
 
     // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림
     if let Some(window) = app.get_webview_window("capture") {
         let app_close = app.clone();
+        let my_id = token.clone();
         window.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let st = app_close.state::<AppState>();
-                if let Some(h) = st.capture.lock().unwrap().take() {
-                    h.cancel.cancel();
+                let mut guard = st.capture.lock().unwrap();
+                // 슬롯에 있는 세션이 내 세션일 때만 정리한다.
+                // (빠른 재시작으로 다른 세션이 이미 슬롯을 차지했으면 뒤늦은 이 이벤트는 무시)
+                if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
+                    if let Some(h) = guard.take() {
+                        h.cancel.cancel();
+                    }
+                    drop(guard);
+                    let _ = app_close.emit("capture-session-ended", ());
                 }
-                let _ = app_close.emit("capture-session-ended", ());
             }
         });
     }
