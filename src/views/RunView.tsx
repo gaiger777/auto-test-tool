@@ -20,6 +20,18 @@ export default function RunView() {
   const [runStatus, setRunStatus] = useState<string>('')
   const [error, setError] = useState('')
   const runIdRef = useRef<number | null>(null)
+  const pendingRef = useRef(false)
+
+  // 시작 직후 invoke 응답보다 이벤트가 먼저 도착하는 레이스 대응:
+  // 실행 요청 대기 중(pending)이면 첫 이벤트의 run_id를 현재 실행으로 채택한다.
+  const isCurrentRun = (id: number) => {
+    if (runIdRef.current === id) return true
+    if (runIdRef.current === null && pendingRef.current) {
+      runIdRef.current = id
+      return true
+    }
+    return false
+  }
 
   useEffect(() => {
     api.listScenarios().then(setScenarios)
@@ -27,17 +39,18 @@ export default function RunView() {
 
     const unlistens = [
       listen<{ run_id: number; index: number }>('step-started', e => {
-        if (e.payload.run_id !== runIdRef.current) return
+        if (!isCurrentRun(e.payload.run_id)) return
         setRows(rows => rows.map((r, i) => (i === e.payload.index ? { ...r, status: 'running' } : r)))
       }),
       listen<{ run_id: number; outcome: StepOutcome }>('step-finished', e => {
-        if (e.payload.run_id !== runIdRef.current) return
+        if (!isCurrentRun(e.payload.run_id)) return
         const o = e.payload.outcome
         setRows(rows => rows.map((r, i) =>
           i === o.index ? { ...r, status: o.status, detail: o.detail, duration_ms: o.duration_ms } : r))
       }),
       listen<{ run_id: number; status: string }>('run-finished', e => {
-        if (e.payload.run_id !== runIdRef.current) return
+        if (!isCurrentRun(e.payload.run_id)) return
+        pendingRef.current = false
         setRunStatus(e.payload.status)
       }),
     ]
@@ -51,9 +64,13 @@ export default function RunView() {
     const steps: StepDef[] = JSON.parse(rec.steps_json)
     setRows(steps.map(s => ({ name: s.name, type: s.type, status: 'pending', detail: '', duration_ms: 0 })))
     setRunStatus('running')
+    runIdRef.current = null
+    pendingRef.current = true
     try {
-      runIdRef.current = await api.runScenario(scenarioId, envId)
+      const id = await api.runScenario(scenarioId, envId)
+      if (runIdRef.current === null) runIdRef.current = id
     } catch (e) {
+      pendingRef.current = false
       setRunStatus('')
       setError(String(e))
     }
