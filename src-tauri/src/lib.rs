@@ -1,6 +1,7 @@
 pub mod assertion;
 pub mod capture_server;
 pub mod capture_session;
+pub mod cert_bypass;
 pub mod commands;
 pub mod engine;
 pub mod events;
@@ -32,6 +33,13 @@ pub fn run() {
                 capture: Mutex::new(None),
             });
             if let Some(main) = app.get_webview_window("main") {
+                // 캡처 창이 깨진 TLS(미신뢰 CA·호스트명 불일치·만료 등) 내부 서버도 로드하도록
+                // wry navigation delegate 클래스에 인증서 검증 우회를 주입한다.
+                // 모든 웹뷰가 같은 delegate 클래스를 공유하므로 메인 창 웹뷰로 1회 설치하면 캡처 창에도 적용된다.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = main.with_webview(|pw| crate::cert_bypass::install(pw.inner()));
+                }
                 let app_handle = app.handle().clone();
                 main.on_window_event(move |event| {
                     if matches!(event, tauri::WindowEvent::Destroyed) {
