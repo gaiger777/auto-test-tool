@@ -28,8 +28,10 @@ export default function App() {
       <div style={{ display: tab === 'run' ? undefined : 'none' }}>
         <RunView active={tab === 'run'} />
       </div>
+      <div style={{ display: tab === 'capture' ? undefined : 'none' }}>
+        <CaptureView />
+      </div>
       {tab === 'scenarios' && <ScenarioBuilder />}
-      {tab === 'capture' && <CaptureView />}
       {tab === 'envs' && <EnvironmentsView />}
       {tab === 'history' && <HistoryView />}
     </main>

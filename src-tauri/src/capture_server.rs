@@ -42,6 +42,7 @@ impl CaptureSink for EventSink {
 struct ServerCtx {
     token: String,
     sink: Box<dyn CaptureSink>,
+    seq: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Deserialize)]
@@ -55,7 +56,10 @@ async fn capture_handler(
     body: String,
 ) -> axum::http::StatusCode {
     match parse_capture(&ctx.token, &q.token, &body) {
-        Ok(call) => {
+        Ok(mut call) => {
+            // 페이지 재탐색으로 스크립트 seq가 리셋돼도 충돌하지 않도록 세션 단조 id로 덮어쓴다
+            let n = ctx.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            call.id = format!("s{n}");
             ctx.sink.emit(call);
             axum::http::StatusCode::OK
         }
@@ -78,7 +82,7 @@ pub async fn start(
         .map_err(|e| format!("수집 서버 바인딩 실패: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
-    let ctx = Arc::new(ServerCtx { token, sink });
+    let ctx = Arc::new(ServerCtx { token, sink, seq: std::sync::atomic::AtomicU64::new(0) });
     let router = axum::Router::new()
         .route("/capture", axum::routing::post(capture_handler))
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))

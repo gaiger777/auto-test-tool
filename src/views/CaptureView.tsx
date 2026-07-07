@@ -39,18 +39,20 @@ export default function CaptureView() {
   }
 
   const stop = async () => {
-    await api.stopCaptureSession().catch(e => setError(String(e)))
-    setActive(false)
-    if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
-      setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
-    }
+    try {
+      await api.stopCaptureSession()
+      setActive(false)
+      if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
+        setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
+      }
+    } catch (e) { setError(String(e)) }
   }
 
   const toggle = (id: string) => setSelected(s => ({ ...s, [id]: !s[id] }))
 
   const addToScenario = async () => {
     setError(''); setNotice('')
-    const chosen = calls.filter(c => selected[c.id])
+    const chosen = calls.filter(c => selected[c.id]).reverse()
     if (chosen.length === 0) { setError('추가할 호출을 선택하세요'); return }
     const steps = capturesToSteps(chosen, tokenHeader)
     const rec: ScenarioRecord = {
