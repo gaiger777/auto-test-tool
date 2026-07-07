@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import * as api from '../api'
 import type { RunRecord, StepResultRecord } from '../types'
 
@@ -7,17 +8,41 @@ export default function HistoryView() {
   const [selected, setSelected] = useState<number | null>(null)
   const [results, setResults] = useState<StepResultRecord[]>([])
   const [error, setError] = useState('')
+  const selectedRef = useRef<number | null>(null)
 
-  useEffect(() => { api.listRuns().then(setRuns).catch(e => setError(String(e))) }, [])
+  const reload = () => {
+    setError('')
+    api.listRuns().then(setRuns).catch(e => setError(String(e)))
+    if (selectedRef.current != null) {
+      const id = selectedRef.current
+      api.listStepResults(id)
+        .then(rs => { if (selectedRef.current === id) setResults(rs) })
+        .catch(e => setError(String(e)))
+    }
+  }
+
+  useEffect(() => {
+    reload()
+    // 히스토리 탭에 머무는 동안 실행이 끝나면 목록/상세를 자동 갱신
+    const un = listen('run-finished', () => reload())
+    return () => { un.then(u => u()) }
+  }, [])
 
   const show = (runId: number) => {
+    setError('')
     setSelected(runId)
-    api.listStepResults(runId).then(setResults).catch(e => setError(String(e)))
+    selectedRef.current = runId
+    api.listStepResults(runId)
+      .then(rs => {
+        // 늦게 도착한 이전 클릭의 응답이 최신 선택을 덮어쓰지 않게 한다
+        if (selectedRef.current === runId) setResults(rs)
+      })
+      .catch(e => setError(String(e)))
   }
 
   return (
     <div>
-      <h2>실행 히스토리</h2>
+      <h2>실행 히스토리 <button onClick={reload}>새로고침</button></h2>
       {error && <p className="error">{error}</p>}
       <table className="history">
         <thead>
