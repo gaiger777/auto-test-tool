@@ -8,9 +8,11 @@ pub fn hook_script(port: u16, token: &str) -> String {
     format!(
         r#"(function() {{
   var ENDPOINT = "http://127.0.0.1:{port}/capture?token={token}";
+  var origFetch = window.fetch;
   var seq = 0;
+  // 캡처 POST는 원본 fetch로 보낸다 — 몽키패치된 fetch로 보내면 자기 자신이 다시 캡처돼 무한 재귀가 된다.
   function send(call) {{
-    try {{ fetch(ENDPOINT, {{ method: "POST", body: JSON.stringify(call), keepalive: true }}).catch(function(){{}}); }} catch (e) {{}}
+    try {{ origFetch.call(window, ENDPOINT, {{ method: "POST", body: JSON.stringify(call), keepalive: true }}).catch(function(){{}}); }} catch (e) {{}}
   }}
   function truncate(s) {{ return (typeof s === "string" && s.length > 8192) ? s.slice(0, 8192) : s; }}
   function headersToObj(h) {{
@@ -19,14 +21,15 @@ pub fn hook_script(port: u16, token: &str) -> String {
     return o;
   }}
 
-  var origFetch = window.fetch;
   window.fetch = function(input, init) {{
     var req;
     try {{ req = new Request(input, init); }} catch (e) {{ return origFetch.apply(this, arguments); }}
     var reqHeaders = headersToObj(req.headers);
     var id = "c" + (++seq);
-    var bodyPromise = init && init.body != null ? Promise.resolve(String(init.body)) : Promise.resolve(null);
-    return origFetch.apply(this, arguments).then(function(resp) {{
+    // Request 객체에 실린 body도 잡히도록 req.clone()에서 읽는다 (init.body만 보면 놓침). GET은 ""→null.
+    var bodyPromise = req.clone().text().then(function(t) {{ return t && t.length ? t : null; }}).catch(function() {{ return null; }});
+    // 원본 arguments 대신 정규화된 req를 넘겨 Request-first 스타일의 body 이중소비를 피한다.
+    return origFetch.call(this, req).then(function(resp) {{
       try {{
         var clone = resp.clone();
         Promise.all([bodyPromise, clone.text().catch(function(){{ return null; }})]).then(function(arr) {{
@@ -53,11 +56,15 @@ pub fn hook_script(port: u16, token: &str) -> String {
     var self = this;
     if (self.__cap) {{
       self.addEventListener("loadend", function() {{
-        var abs;
-        try {{ abs = new URL(self.__cap.url, location.href).href; }} catch (e) {{ abs = self.__cap.url; }}
-        send({{ id: "c" + (++seq), method: self.__cap.method, url: abs, request_headers: self.__cap.headers,
-                request_body: body != null ? String(body) : null, status: self.status,
-                response_body: truncate(typeof self.responseText === "string" ? self.responseText : null), timestamp: Date.now() }});
+        try {{
+          var abs;
+          try {{ abs = new URL(self.__cap.url, location.href).href; }} catch (e) {{ abs = self.__cap.url; }}
+          // responseType이 text/''가 아니면 responseText 접근 자체가 예외를 던지므로 먼저 걸러낸다.
+          var rt = (self.responseType === "" || self.responseType === "text") ? self.responseText : null;
+          send({{ id: "c" + (++seq), method: self.__cap.method, url: abs, request_headers: self.__cap.headers,
+                  request_body: body != null ? String(body) : null, status: self.status,
+                  response_body: truncate(rt), timestamp: Date.now() }});
+        }} catch (e) {{}}
       }});
     }}
     return XS.apply(this, arguments);
@@ -100,5 +107,26 @@ mod tests {
     fn script_truncates_at_8kb() {
         let s = hook_script(1, "t");
         assert!(s.contains("8192"));
+    }
+
+    #[test]
+    fn script_posts_capture_via_original_fetch() {
+        // C1 회귀: 캡처 POST가 origFetch로 나가야 자기 재캡처 무한루프가 안 생긴다
+        let s = hook_script(1, "t");
+        assert!(s.contains("origFetch.call(window, ENDPOINT"));
+    }
+
+    #[test]
+    fn script_guards_response_type_before_reading_text() {
+        // I1 회귀: responseType 체크 후에만 responseText 접근
+        let s = hook_script(1, "t");
+        assert!(s.contains("self.responseType"));
+    }
+
+    #[test]
+    fn script_reads_fetch_body_from_request_clone() {
+        // I2 회귀: Request 객체 body도 잡히도록 req.clone()에서 읽음
+        let s = hook_script(1, "t");
+        assert!(s.contains("req.clone().text()"));
     }
 }
