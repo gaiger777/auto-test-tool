@@ -2883,6 +2883,11 @@ git add -A && git commit -m "feat: 시나리오 빌더 및 OpenStack 프리셋"
 
 ### Task 16: 실행 화면 + 앱 조립 (RunView.tsx, App.tsx)
 
+> **구현 반영 노트**: 아래 RunView 코드의 `runIdRef` 필터에는 스타트업 레이스가 있다
+> (invoke 응답이 도착하기 전에 백엔드가 emit한 이벤트가 버려짐). 실제 구현은
+> `pendingRef` + `isCurrentRun()` 채택 방식으로 수정됨 — 커밋 db2991e 참조.
+> 이 화면은 동시에 실행을 하나만 시작하므로 "대기 중 첫 이벤트가 run_id를 채택"이 안전하다.
+
 **Files:**
 - Create: `src/views/RunView.tsx`
 - Modify: `src/App.tsx` (전체 교체), `src/App.css` (전체 교체)
