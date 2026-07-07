@@ -430,14 +430,14 @@ pub fn hook_script(port: u16, token: &str) -> String {
 }
 
 /// 대상 URL을 캡처 웹뷰 창("capture")으로 열고 후킹 스크립트를 주입한다.
-pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<(), String> {
+pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::WebviewWindow, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
-    WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
+    let window = WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
         .title("캡처 세션")
         .initialization_script(&script)
         .build()
         .map_err(|e| format!("캡처 창 생성 실패: {e}"))?;
-    Ok(())
+    Ok(window)
 }
 
 #[cfg(test)]
@@ -508,6 +508,7 @@ pub struct AppState {
 }
 
 pub struct CaptureHandle {
+    pub id: String,
     pub cancel: CancellationToken,
 }
 ```
@@ -519,7 +520,9 @@ pub struct CaptureHandle {
 ```rust
 // --- 캡처 세션 ---
 
-/// 세션 시작을 위한 비암호학적 토큰 생성 (localhost 한정, 우발적 끼어들기 방지 수준).
+/// 세션 시작을 위한 비암호학적 토큰 생성 (nanos 기반이라 예측·재현 가능).
+/// 위협모델은 localhost 한정 우발적 끼어들기 방지 수준이며, 로컬 악성 프로세스 방어가
+/// 필요해지면 CSPRNG로 교체할 것.
 fn generate_capture_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -534,35 +537,64 @@ pub async fn start_capture_session(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<u16, String> {
-    if state.capture.lock().unwrap().is_some() {
-        return Err("이미 캡처 세션이 진행 중입니다".into());
-    }
     let token = generate_capture_token();
     let cancel = CancellationToken::new();
+    // 체크 + 슬롯 선점을 원자적으로 — await 구간 동안 동시 start를 막는다 (label 유일성에 비의존)
+    {
+        let mut guard = state.capture.lock().unwrap();
+        if guard.is_some() {
+            return Err("이미 캡처 세션이 진행 중입니다".into());
+        }
+        *guard = Some(CaptureHandle { id: token.clone(), cancel: cancel.clone() });
+    }
+    // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
+    if let Some(win) = app.get_webview_window("capture") {
+        let _ = win.close();
+    }
+
     let sink = Box::new(EventSink { app: app.clone() });
-    let port = capture_server::start(token.clone(), sink, cancel.clone()).await?;
+    let port = match capture_server::start(token.clone(), sink, cancel.clone()).await {
+        Ok(p) => p,
+        Err(e) => {
+            // 우리 예약이 아직 남아있으면 되돌린다 (좀비 방지)
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            cancel.cancel();
+            return Err(e);
+        }
+    };
 
     let script = capture_session::hook_script(port, &token);
-    if let Err(e) = capture_session::open_capture_window(&app, &url, script) {
-        cancel.cancel(); // 창 생성 실패 시 서버 정리 (좀비 방지)
-        return Err(e);
-    }
+    let window = match capture_session::open_capture_window(&app, &url, script) {
+        Ok(w) => w,
+        Err(e) => {
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            cancel.cancel();
+            return Err(e);
+        }
+    };
 
-    *state.capture.lock().unwrap() = Some(CaptureHandle { cancel });
-
-    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림
-    if let Some(window) = app.get_webview_window("capture") {
-        let app_close = app.clone();
-        window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
-                let st = app_close.state::<AppState>();
-                if let Some(h) = st.capture.lock().unwrap().take() {
+    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림 (슬롯의 세션이 자기 세션일 때만)
+    let app_close = app.clone();
+    let my_id = token.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            let st = app_close.state::<AppState>();
+            let mut guard = st.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
+                if let Some(h) = guard.take() {
                     h.cancel.cancel();
                 }
+                drop(guard);
                 let _ = app_close.emit("capture-session-ended", ());
             }
-        });
-    }
+        }
+    });
     Ok(port)
 }
 
@@ -600,6 +632,23 @@ pub fn capture_session_active(state: State<AppState>) -> Result<bool, String> {
                 active_runs: Mutex::new(Default::default()),
                 capture: Mutex::new(None),
             });
+            // 메인 창을 닫으면 활성 캡처 세션(서버·창)을 함께 정리 — 유령 세션 방지
+            if let Some(main) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                        let st = app_handle.state::<AppState>();
+                        // 락을 먼저 놓고 창을 닫아 캡처 창 Destroyed 핸들러와 재진입 데드락 회피
+                        let handle = st.capture.lock().unwrap().take();
+                        if let Some(h) = handle {
+                            h.cancel.cancel();
+                        }
+                        if let Some(w) = app_handle.get_webview_window("capture") {
+                            let _ = w.close();
+                        }
+                    }
+                });
+            }
 ```
 
 `generate_handler!` 목록의 `commands::cancel_run` 뒤에 콤마와 3개 추가:
@@ -618,7 +667,7 @@ Run:
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
-Expected: 기존 46 + capture 8 = 54개 PASS, clippy 경고 0
+Expected: 58개 PASS (기존 + capture 서버/스크립트/토큰 테스트), clippy 경고 0
 
 - [ ] **Step 6: 커밋**
 
