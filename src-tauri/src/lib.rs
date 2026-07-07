@@ -31,6 +31,22 @@ pub fn run() {
                 active_runs: Mutex::new(Default::default()),
                 capture: Mutex::new(None),
             });
+            if let Some(main) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                        let st = app_handle.state::<AppState>();
+                        // 락을 먼저 놓고 창을 닫아 캡처 창 Destroyed 핸들러와 재진입 데드락을 피한다
+                        let handle = st.capture.lock().unwrap().take();
+                        if let Some(h) = handle {
+                            h.cancel.cancel();
+                        }
+                        if let Some(w) = app_handle.get_webview_window("capture") {
+                            let _ = w.close();
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

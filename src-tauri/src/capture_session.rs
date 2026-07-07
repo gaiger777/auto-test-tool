@@ -74,14 +74,14 @@ pub fn hook_script(port: u16, token: &str) -> String {
 }
 
 /// 대상 URL을 캡처 웹뷰 창("capture")으로 열고 후킹 스크립트를 주입한다.
-pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<(), String> {
+pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::WebviewWindow, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
-    WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
+    let window = WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
         .title("캡처 세션")
         .initialization_script(&script)
         .build()
         .map_err(|e| format!("캡처 창 생성 실패: {e}"))?;
-    Ok(())
+    Ok(window)
 }
 
 #[cfg(test)]
