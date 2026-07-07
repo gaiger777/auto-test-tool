@@ -233,6 +233,7 @@ impl CaptureSink for EventSink {
 struct ServerCtx {
     token: String,
     sink: Box<dyn CaptureSink>,
+    seq: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Deserialize)]
@@ -246,7 +247,10 @@ async fn capture_handler(
     body: String,
 ) -> axum::http::StatusCode {
     match parse_capture(&ctx.token, &q.token, &body) {
-        Ok(call) => {
+        Ok(mut call) => {
+            // 페이지 재탐색으로 스크립트 seq가 리셋돼도 충돌하지 않도록 세션 단조 id로 덮어쓴다
+            let n = ctx.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            call.id = format!("s{n}");
             ctx.sink.emit(call);
             axum::http::StatusCode::OK
         }
@@ -266,7 +270,7 @@ pub async fn start(
         .map_err(|e| format!("수집 서버 바인딩 실패: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
-    let ctx = Arc::new(ServerCtx { token, sink });
+    let ctx = Arc::new(ServerCtx { token, sink, seq: std::sync::atomic::AtomicU64::new(0) });
     let router = axum::Router::new()
         .route("/capture", axum::routing::post(capture_handler))
         .with_state(ctx);
@@ -741,18 +745,20 @@ export default function CaptureView() {
   }
 
   const stop = async () => {
-    await api.stopCaptureSession().catch(e => setError(String(e)))
-    setActive(false)
-    if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
-      setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
-    }
+    try {
+      await api.stopCaptureSession()
+      setActive(false)
+      if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
+        setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
+      }
+    } catch (e) { setError(String(e)) }
   }
 
   const toggle = (id: string) => setSelected(s => ({ ...s, [id]: !s[id] }))
 
   const addToScenario = async () => {
     setError(''); setNotice('')
-    const chosen = calls.filter(c => selected[c.id])
+    const chosen = calls.filter(c => selected[c.id]).reverse() // 목록은 최신순, 스텝은 캡처 시간순
     if (chosen.length === 0) { setError('추가할 호출을 선택하세요'); return }
     const steps = capturesToSteps(chosen, tokenHeader)
     const rec: ScenarioRecord = {
@@ -846,8 +852,10 @@ export default function App() {
       <div style={{ display: tab === 'run' ? undefined : 'none' }}>
         <RunView active={tab === 'run'} />
       </div>
+      <div style={{ display: tab === 'capture' ? undefined : 'none' }}>
+        <CaptureView />
+      </div>
       {tab === 'scenarios' && <ScenarioBuilder />}
-      {tab === 'capture' && <CaptureView />}
       {tab === 'envs' && <EnvironmentsView />}
       {tab === 'history' && <HistoryView />}
     </main>
