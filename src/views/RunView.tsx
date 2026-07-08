@@ -15,14 +15,19 @@ export default function RunView({ active }: { active: boolean }) {
   useEffect(() => {
     if (!active) return
     api.listScenarios().then(setScenarios)
-    api.listEnvironments().then(setEnvs)
+    api.listEnvironments().then(list => {
+      setEnvs(list)
+      setEnvId(prev => prev ?? list[0]?.id ?? null) // 미선택 시 첫 환경 자동 선택
+    })
   }, [active])
 
   const start = () => {
-    if (scenarioId == null || envId == null) { setError('시나리오와 환경을 선택하세요'); return }
+    if (scenarioId == null) { setError('시나리오를 선택하세요'); return }
+    const eid = envId ?? envs[0]?.id ?? null // 환경 미선택 시 첫 환경으로 실행
+    if (eid == null) { setError('실행하려면 환경을 먼저 등록하세요 (환경 탭)'); return }
     setError('')
     const rec = scenarios.find(s => s.id === scenarioId)!
-    run.start(rec, envId)
+    run.start(rec, eid)
   }
 
   return (

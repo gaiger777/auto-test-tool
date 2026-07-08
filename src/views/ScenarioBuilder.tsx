@@ -35,7 +35,12 @@ export default function ScenarioBuilder() {
 
   const reload = () => api.listScenarios().then(setScenarios).catch(e => setError(String(e)))
   useEffect(() => { reload() }, [])
-  useEffect(() => { api.listEnvironments().then(setEnvs).catch(() => {}) }, [])
+  useEffect(() => {
+    api.listEnvironments().then(list => {
+      setEnvs(list)
+      setEnvId(prev => prev ?? list[0]?.id ?? null) // 미선택 시 첫 환경 자동 선택
+    }).catch(() => {})
+  }, [])
 
   const changeEnv = (id: number | null) => {
     setEnvId(id)
@@ -44,9 +49,10 @@ export default function ScenarioBuilder() {
   }
 
   const runScenario = (s: ScenarioRecord) => {
-    if (envId == null) { setError('실행 환경을 먼저 선택하세요'); return }
+    const eid = envId ?? envs[0]?.id ?? null // 환경 미선택 시 첫 환경으로 실행
+    if (eid == null) { setError('실행하려면 환경을 먼저 등록하세요 (환경 탭)'); return }
     setError('')
-    run.start(s, envId)
+    run.start(s, eid)
   }
 
   const changeSteps = (next: StepDef[]) => {
