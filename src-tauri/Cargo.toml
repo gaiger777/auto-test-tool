@@ -32,7 +32,12 @@ tokio-util = "0.7.18"
 futures-util = "0.3.32"
 chrono = "0.4.45"
 tauri-plugin-dialog = "2.7.1"
-axum = "0.8.9"
+
+# macOS WKWebView 인증서 검증 우회(cert_bypass)용. objc 런타임으로 navigation delegate에
+# 인증 챌린지 핸들러를 주입한다. 버전은 wry가 쓰는 것과 맞춘다.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
 
 [dev-dependencies]
 wiremock = "0.6.5"

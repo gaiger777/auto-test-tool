@@ -1,22 +1,149 @@
-main { max-width: 1100px; margin: 0 auto; padding: 1rem; font-family: system-ui, sans-serif; }
-.tabs { display: flex; gap: 0.5rem; border-bottom: 1px solid #ccc; margin-bottom: 1rem; }
-.tabs button { border: none; background: none; padding: 0.5rem 1rem; cursor: pointer; }
-.tabs button.active { border-bottom: 2px solid #396cd8; font-weight: bold; }
-.two-col { display: grid; grid-template-columns: 260px 1fr; gap: 1.5rem; align-items: start; }
-.field { display: block; margin-bottom: 0.5rem; }
-.field input, .field select, .field textarea { display: block; width: 100%; box-sizing: border-box; padding: 0.3rem; }
-.check { display: block; margin-bottom: 0.5rem; }
-.list { list-style: none; padding: 0; }
-.list li { display: flex; gap: 0.4rem; margin-bottom: 0.3rem; }
-.error { color: #c00; }
-.dim { color: #888; }
-.danger { color: #c00; }
-.step { border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.4rem; padding: 0.3rem; }
-.step summary { cursor: pointer; }
-.step-actions { float: right; display: inline-flex; gap: 0.3rem; }
-.step-form { padding: 0.5rem; }
-.add-row { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; align-items: center; }
-.run-steps li { margin-bottom: 0.5rem; }
-.detail { background: #f6f6f6; padding: 0.4rem; max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 0.8rem; }
-table.history { border-collapse: collapse; width: 100%; }
-table.history th, table.history td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; }
+/* VS Code 다크 톤앤매너 — wFlowApp(dripper) 팔레트 이식 */
+:root {
+  --vsc-bg: #1e1e1e;
+  --vsc-bg-alt: #252526;
+  --vsc-bg-deep: #181818;
+  --vsc-titlebar: #3c3c3c;
+  --vsc-statusbar: #007acc;
+  --vsc-border: #2b2b2b;
+  --vsc-border-strong: #3c3c3c;
+  --vsc-fg: #cccccc;
+  --vsc-fg-strong: #ffffff;
+  --vsc-fg-muted: #858585;
+  --vsc-hover: #2a2d2e;
+  --vsc-list-active: #094771;
+  --vsc-list-inactive: #37373d;
+  --vsc-accent: #007acc;
+  --vsc-danger: #f48771;
+  --vsc-ok: #89d185;
+  --vsc-focus: #007fd4;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  background: var(--vsc-bg);
+  color: var(--vsc-fg);
+}
+
+/* ── 레이아웃 ── */
+.app { display: flex; flex-direction: column; height: 100vh; }
+.workspace { display: flex; flex: 1; min-height: 0; }
+
+.activitybar {
+  width: 48px; flex-shrink: 0;
+  background: var(--vsc-bg-alt);
+  border-right: 1px solid var(--vsc-border);
+  display: flex; flex-direction: column; align-items: center;
+  padding-top: 6px; gap: 2px;
+}
+.activity-item {
+  width: 48px; height: 44px;
+  background: transparent; border: none; border-left: 2px solid transparent;
+  color: var(--vsc-fg-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.activity-item .codicon { font-size: 22px; }
+.activity-item:hover { color: var(--vsc-fg); }
+.activity-item.active { color: var(--vsc-fg-strong); border-left-color: var(--vsc-accent); }
+
+.main { flex: 1; min-width: 0; overflow: auto; padding: 16px 22px; }
+
+/* ── 타이포 ── */
+h2 { font-size: 15px; font-weight: 600; color: var(--vsc-fg-strong); margin: 0 0 12px; }
+h3 { font-size: 13px; font-weight: 600; color: var(--vsc-fg); margin: 16px 0 8px; }
+
+/* ── 버튼 ── */
+button {
+  font-family: inherit; font-size: 13px;
+  background: var(--vsc-bg-alt); color: var(--vsc-fg);
+  border: 1px solid var(--vsc-border-strong); border-radius: 4px;
+  padding: 4px 12px; cursor: pointer;
+}
+button:hover { background: var(--vsc-hover); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.accent { background: var(--vsc-accent); color: #fff; border-color: var(--vsc-accent); }
+button.accent:hover { background: #0a86dd; }
+button.accent:disabled { background: var(--vsc-accent); }
+button.danger { color: var(--vsc-danger); }
+button.danger:hover { background: var(--vsc-hover); }
+
+/* 키보드 포커스 링만 표시 (마우스는 숨김) */
+button:focus { outline: none; }
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible { outline: 1px solid var(--vsc-focus); outline-offset: -1px; }
+
+/* ── 입력 ── */
+input, select, textarea {
+  font-family: inherit; font-size: 13px;
+  background: var(--vsc-bg-deep); color: var(--vsc-fg);
+  border: 1px solid var(--vsc-border-strong); border-radius: 4px; padding: 4px 8px;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--vsc-focus); }
+select { cursor: pointer; }
+
+/* ── 공용 컴포넌트 ── */
+.two-col { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
+.field { display: block; margin-bottom: 10px; color: var(--vsc-fg-muted); font-size: 12px; }
+.field input, .field select, .field textarea { display: block; width: 100%; margin-top: 4px; color: var(--vsc-fg); font-size: 13px; }
+.check { display: block; margin-bottom: 8px; }
+.add-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+
+.list { list-style: none; padding: 0; margin: 0; }
+.list li { margin-bottom: 4px; }
+
+.error { color: var(--vsc-danger); }
+.dim { color: var(--vsc-fg-muted); }
+
+.step {
+  border: 1px solid var(--vsc-border); border-radius: 4px; margin-bottom: 6px;
+  padding: 6px 8px; background: var(--vsc-bg-alt);
+}
+.step summary { cursor: pointer; color: var(--vsc-fg); }
+.step-actions { float: right; display: inline-flex; gap: 4px; }
+.step-form { padding: 8px 4px; }
+
+.run-steps { list-style: none; padding: 0; margin: 8px 0 0; }
+.run-steps li { margin-bottom: 6px; }
+.detail {
+  background: var(--vsc-bg-deep); border: 1px solid var(--vsc-border);
+  border-radius: 4px; padding: 8px; max-height: 200px; overflow: auto;
+  white-space: pre-wrap; font-size: 12px; margin: 4px 0 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--vsc-fg);
+}
+
+table.history { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.history th, table.history td { border: 1px solid var(--vsc-border); padding: 6px 10px; text-align: left; }
+table.history th { background: var(--vsc-bg-alt); color: var(--vsc-fg-muted); font-weight: 600; }
+
+/* ── 시나리오 인라인 실행 ── */
+.scenario-row-main { display: flex; gap: 6px; align-items: center; }
+.scenario-row .run-btn { padding: 3px 9px; }
+.scenario-name { flex: 1; text-align: left; background: transparent; border-color: transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scenario-name:hover { background: var(--vsc-hover); }
+.scenario-run {
+  margin: 6px 0 12px 8px; padding: 8px 10px;
+  border-left: 2px solid var(--vsc-accent); border-radius: 0 4px 4px 0;
+  background: var(--vsc-bg-alt);
+}
+.scenario-run-head { display: flex; gap: 8px; align-items: center; }
+.status-badge {
+  font-size: 11px; padding: 1px 8px; border-radius: 10px;
+  border: 1px solid var(--vsc-border-strong); color: var(--vsc-fg-muted);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.status-badge.running { color: var(--vsc-accent); border-color: var(--vsc-accent); }
+.status-badge.passed { color: var(--vsc-ok); border-color: var(--vsc-ok); }
+.status-badge.failed,
+.status-badge.cancelled { color: var(--vsc-danger); border-color: var(--vsc-danger); }
+
+/* ── 스크롤바 ── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #4f4f4f; }
+::-webkit-scrollbar-track { background: transparent; }

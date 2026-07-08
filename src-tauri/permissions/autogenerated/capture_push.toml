@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-capture-push"
+description = "Enables the capture_push command without any pre-configured scope."
+commands.allow = ["capture_push"]
+
+[[permission]]
+identifier = "deny-capture-push"
+description = "Denies the capture_push command without any pre-configured scope."
+commands.deny = ["capture_push"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-import-scenario"
+description = "Enables the import_scenario command without any pre-configured scope."
+commands.allow = ["import_scenario"]
+
+[[permission]]
+identifier = "deny-import-scenario"
+description = "Denies the import_scenario command without any pre-configured scope."
+commands.deny = ["import_scenario"]

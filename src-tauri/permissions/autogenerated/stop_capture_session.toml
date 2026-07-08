@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-stop-capture-session"
+description = "Enables the stop_capture_session command without any pre-configured scope."
+commands.allow = ["stop_capture_session"]
+
+[[permission]]
+identifier = "deny-stop-capture-session"
+description = "Denies the stop_capture_session command without any pre-configured scope."
+commands.deny = ["stop_capture_session"]
