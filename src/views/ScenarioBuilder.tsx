@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { presets } from '../presets'
-import type { ScenarioRecord, StepDef } from '../types'
+import { useRun } from '../hooks/useRun'
+import { RunProgress } from './RunProgress'
+import type { Environment, ScenarioRecord, StepDef } from '../types'
 import StepForm from './StepForm'
 
 const blankStep = (type: StepDef['type']): StepDef => {
@@ -23,8 +25,29 @@ export default function ScenarioBuilder() {
   const [error, setError] = useState('')
   const [dirty, setDirty] = useState(false)
 
+  // 시나리오 목록에서 바로 실행 — 전역 환경 선택(선택값 기억) + 인라인 진행
+  const [envs, setEnvs] = useState<Environment[]>([])
+  const [envId, setEnvId] = useState<number | null>(() => {
+    const v = localStorage.getItem('run.envId')
+    return v ? Number(v) : null
+  })
+  const run = useRun()
+
   const reload = () => api.listScenarios().then(setScenarios).catch(e => setError(String(e)))
   useEffect(() => { reload() }, [])
+  useEffect(() => { api.listEnvironments().then(setEnvs).catch(() => {}) }, [])
+
+  const changeEnv = (id: number | null) => {
+    setEnvId(id)
+    if (id == null) localStorage.removeItem('run.envId')
+    else localStorage.setItem('run.envId', String(id))
+  }
+
+  const runScenario = (s: ScenarioRecord) => {
+    if (envId == null) { setError('실행 환경을 먼저 선택하세요'); return }
+    setError('')
+    run.start(s, envId)
+  }
 
   const changeSteps = (next: StepDef[]) => {
     setSteps(next)
@@ -99,13 +122,35 @@ export default function ScenarioBuilder() {
     <div className="two-col">
       <div>
         <h2>시나리오</h2>
-        <button onClick={newScenario}>새 시나리오</button>
-        <button onClick={doImport}>가져오기</button>
+        <div className="add-row">
+          <button onClick={newScenario}>새 시나리오</button>
+          <button onClick={doImport}>가져오기</button>
+        </div>
+        <label className="field">실행 환경
+          <select value={envId ?? ''} onChange={e => changeEnv(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">환경 선택</option>
+            {envs.map(e2 => <option key={e2.id} value={e2.id!}>{e2.name}</option>)}
+          </select>
+        </label>
+        {run.error && <p className="error">{run.error}</p>}
         <ul className="list">
           {scenarios.map(s => (
             <li key={s.id}>
-              <button onClick={() => edit(s)}>{s.name}</button>
-              <button className="danger" onClick={() => removeScenario(s)}>삭제</button>
+              <div className="scenario-row-main">
+                <button className="run-btn accent" title="실행" disabled={run.running}
+                  onClick={() => runScenario(s)}>▶</button>
+                <button className="scenario-name" onClick={() => edit(s)}>{s.name}</button>
+                <button className="danger" onClick={() => removeScenario(s)}>삭제</button>
+              </div>
+              {run.activeScenarioId === s.id && (
+                <div className="scenario-run">
+                  <div className="scenario-run-head">
+                    <span className={`status-badge ${run.status}`}>{run.status}</span>
+                    {run.running && <button className="danger" onClick={run.cancel}>취소</button>}
+                  </div>
+                  <RunProgress rows={run.rows} />
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -152,8 +197,10 @@ export default function ScenarioBuilder() {
         </div>
 
         {error && <p className="error">{error}</p>}
-        <button onClick={saveCurrent}>저장</button>
-        <button onClick={doExport}>내보내기</button>
+        <div className="add-row">
+          <button className="accent" onClick={saveCurrent}>저장</button>
+          <button onClick={doExport}>내보내기</button>
+        </div>
       </div>
     </div>
   )
