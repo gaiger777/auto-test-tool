@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture-remote",
+  "description": "캡처 창(외부 원격 페이지)이 캡처 데이터를 IPC로 밀어넣도록 capture_push 만 허용",
+  "windows": ["capture"],
+  "remote": {
+    "urls": ["https://*.okestro.cloud", "https://*.okestro-k8s.com"]
+  },
+  "permissions": ["allow-capture-push"]
+}

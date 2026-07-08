@@ -1,4 +1,4 @@
-use crate::capture_server::{self, EventSink};
+use crate::capture_server;
 use crate::capture_session;
 use crate::engine::{self, ProgressSink, RunInput, StepOutcome, StepStatus, TokenRefresher};
 use crate::events::EventBus;
@@ -20,6 +20,8 @@ pub struct AppState {
 pub struct CaptureHandle {
     pub id: String,
     pub cancel: CancellationToken,
+    /// 세션 단조 증가 id 카운터. 페이지 재탐색으로 스크립트 seq가 리셋돼도 id 충돌이 없도록 한다.
+    pub seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 fn now() -> String {
@@ -272,41 +274,28 @@ fn generate_capture_token() -> String {
 }
 
 #[tauri::command]
-pub async fn start_capture_session(
+pub fn start_capture_session(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<AppState>,
     url: String,
-) -> Result<u16, String> {
+) -> Result<(), String> {
     let token = generate_capture_token();
     let cancel = CancellationToken::new();
-    // 체크 + 슬롯 선점을 원자적으로 — await 구간 동안 동시 start를 막는다 (label 유일성에 의존하지 않음)
+    let seq = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // 체크 + 슬롯 선점을 원자적으로 — 동시 start를 막는다 (label 유일성에 의존하지 않음)
     {
         let mut guard = state.capture.lock().unwrap();
         if guard.is_some() {
             return Err("이미 캡처 세션이 진행 중입니다".into());
         }
-        *guard = Some(CaptureHandle { id: token.clone(), cancel: cancel.clone() });
+        *guard = Some(CaptureHandle { id: token.clone(), cancel: cancel.clone(), seq });
     }
     // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
     if let Some(win) = app.get_webview_window("capture") {
         let _ = win.close();
     }
 
-    let sink = Box::new(EventSink { app: app.clone() });
-    let port = match capture_server::start(token.clone(), sink, cancel.clone()).await {
-        Ok(p) => p,
-        Err(e) => {
-            // 우리 예약이 아직 남아있으면 되돌린다
-            let mut guard = state.capture.lock().unwrap();
-            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
-                guard.take();
-            }
-            cancel.cancel();
-            return Err(e);
-        }
-    };
-
-    let script = capture_session::hook_script(port, &token);
+    let script = capture_session::hook_script(&token);
     let window = match capture_session::open_capture_window(&app, &url, script) {
         Ok(w) => w,
         Err(e) => {
@@ -335,7 +324,31 @@ pub async fn start_capture_session(
             }
         }
     });
-    Ok(port)
+    Ok(())
+}
+
+/// 캡처 웹뷰의 후킹 스크립트가 IPC로 밀어넣는 캡처를 수집한다.
+/// 원격 origin에서 호출되므로 capabilities/capture.json 의 remote 스코프로 허용된다.
+#[tauri::command]
+pub fn capture_push(
+    app: AppHandle,
+    state: State<AppState>,
+    token: String,
+    mut call: capture_server::CapturedCall,
+) -> Result<(), String> {
+    // 세션 신원 검증: 현재 활성 세션의 토큰과 일치할 때만 수집 (재시작·스테일 창의 오수집 방지)
+    let seq = {
+        let guard = state.capture.lock().unwrap();
+        match guard.as_ref() {
+            Some(h) if h.id == token => h.seq.clone(),
+            _ => return Err("활성 캡처 세션이 아니거나 토큰 불일치".into()),
+        }
+    };
+    // 페이지 재탐색으로 스크립트 seq가 리셋돼도 충돌하지 않도록 세션 단조 id로 덮어쓴다
+    let n = seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    call.id = format!("s{n}");
+    let _ = app.emit("capture-recorded", call);
+    Ok(())
 }
 
 #[tauri::command]

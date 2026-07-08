@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-step-results"
+description = "Enables the list_step_results command without any pre-configured scope."
+commands.allow = ["list_step_results"]
+
+[[permission]]
+identifier = "deny-list-step-results"
+description = "Denies the list_step_results command without any pre-configured scope."
+commands.deny = ["list_step_results"]

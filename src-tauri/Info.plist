@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      캡처 대상인 내부 dev 서버들이 사설 CA·호스트명 불일치·비표준 TLS 설정을 쓰기 때문에,
+      ATS(App Transport Security)를 비활성화해 이런 서버로의 연결을 허용한다.
+      (서버 인증서 신뢰 자체는 cert_bypass.rs 가 처리. 내부 서버 대상 테스트 툴 한정 다운그레이드)
+    -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
