@@ -8,6 +8,10 @@
 //! 클래스에 objc 런타임으로 `webView:didReceiveAuthenticationChallenge:completionHandler:` 를 주입한다.
 //! 모든 웹뷰가 같은 delegate 클래스를 공유하므로, 시작 시 메인 창 웹뷰의 delegate 클래스에
 //! 1회 추가하면 이후 생성되는 캡처 창에도 자동 적용된다.
+//!
+//! 주의: 이것만으로는 릴리즈 번들에서 부족하다. 번들은 Info.plist ATS(App Transport Security)가
+//! 서버신뢰 챌린지 통과 후에도 별도 요건으로 연결을 거부하므로, `src-tauri/Info.plist` 의
+//! `NSAllowsArbitraryLoads` 로 ATS를 함께 비활성화해야 한다.
 
 #[cfg(target_os = "macos")]
 mod imp {
@@ -43,8 +47,17 @@ mod imp {
             (*completion).call((PERFORM_DEFAULT, std::ptr::null_mut()));
             return;
         }
-        let cred: *mut AnyObject = msg_send![class!(NSURLCredential), credentialForTrust: trust];
-        (*completion).call((USE_CREDENTIAL, cred));
+        // credentialForTrust: 는 autorelease 객체를 반환한다. Retained로 명시 retain 해서
+        // completion 호출이 끝날 때까지 살려둔다(raw 포인터로 두면 조기 해제될 수 있다).
+        let cred: Option<objc2::rc::Retained<AnyObject>> =
+            msg_send![class!(NSURLCredential), credentialForTrust: trust];
+        match cred {
+            Some(c) => (*completion).call((
+                USE_CREDENTIAL,
+                objc2::rc::Retained::as_ptr(&c) as *mut AnyObject,
+            )),
+            None => (*completion).call((PERFORM_DEFAULT, std::ptr::null_mut())),
+        }
     }
 
     pub unsafe fn install(webview_ptr: *mut c_void) {
@@ -73,7 +86,6 @@ mod imp {
                 ),
         );
         objc2::ffi::class_addMethod(cls as *mut _, selector, imp_ptr, types.as_ptr());
-        eprintln!("[cert_bypass] WKWebView 인증서 검증 우회 설치 완료");
     }
 }
 
