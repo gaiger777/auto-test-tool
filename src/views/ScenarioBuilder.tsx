@@ -31,16 +31,12 @@ export default function ScenarioBuilder() {
     const v = localStorage.getItem('run.envId')
     return v ? Number(v) : null
   })
+  const [token, setToken] = useState<string>(() => localStorage.getItem('run.token') ?? '')
   const run = useRun()
 
   const reload = () => api.listScenarios().then(setScenarios).catch(e => setError(String(e)))
   useEffect(() => { reload() }, [])
-  useEffect(() => {
-    api.listEnvironments().then(list => {
-      setEnvs(list)
-      setEnvId(prev => prev ?? list[0]?.id ?? null) // 미선택 시 첫 환경 자동 선택
-    }).catch(() => {})
-  }, [])
+  useEffect(() => { api.listEnvironments().then(setEnvs).catch(() => {}) }, [])
 
   const changeEnv = (id: number | null) => {
     setEnvId(id)
@@ -48,11 +44,12 @@ export default function ScenarioBuilder() {
     else localStorage.setItem('run.envId', String(id))
   }
 
+  const changeToken = (t: string) => { setToken(t); localStorage.setItem('run.token', t) }
+
   const runScenario = (s: ScenarioRecord) => {
-    const eid = envId ?? envs[0]?.id ?? null // 환경 미선택 시 첫 환경으로 실행
-    if (eid == null) { setError('실행하려면 환경을 먼저 등록하세요 (환경 탭)'); return }
     setError('')
-    run.start(s, eid)
+    const vars = token.trim() ? { auth_token: token.trim() } : undefined
+    run.start(s, envId, vars) // 환경 미선택(null) → Postman식 단순 실행
   }
 
   const changeSteps = (next: StepDef[]) => {
@@ -134,9 +131,12 @@ export default function ScenarioBuilder() {
         </div>
         <label className="field">실행 환경
           <select value={envId ?? ''} onChange={e => changeEnv(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">환경 선택</option>
+            <option value="">환경 없음 (단순 실행)</option>
             {envs.map(e2 => <option key={e2.id} value={e2.id!}>{e2.name}</option>)}
           </select>
+        </label>
+        <label className="field">인증 토큰 <span className="dim">(환경 없이 실행 시 auth_token)</span>
+          <input value={token} onChange={e => changeToken(e.target.value)} placeholder="토큰 붙여넣기" />
         </label>
         {run.error && <p className="error">{run.error}</p>}
         <ul className="list">

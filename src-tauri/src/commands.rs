@@ -145,12 +145,10 @@ pub async fn run_scenario(
     app: AppHandle,
     state: State<'_, AppState>,
     scenario_id: i64,
-    env_id: i64,
+    env_id: Option<i64>,
+    vars: Option<HashMap<String, String>>,
 ) -> Result<i64, String> {
-    let (env, scenario_rec) = {
-        let db = state.db.lock().unwrap();
-        (db.get_environment(env_id)?, db.get_scenario(scenario_id)?)
-    };
+    let scenario_rec = state.db.lock().unwrap().get_scenario(scenario_id)?;
     let steps: Vec<StepDef> =
         serde_json::from_str(&scenario_rec.steps_json).map_err(|e| e.to_string())?;
     let scenario = Scenario {
@@ -158,62 +156,75 @@ pub async fn run_scenario(
         description: scenario_rec.description,
         steps,
     };
-    // OS 키체인은 사용자 승인 모달로 무기한 블록될 수 있어 블로킹 워커에서 격리
-    let password = tauri::async_runtime::spawn_blocking(move || store::get_password(env_id))
-        .await
-        .map_err(|e| format!("키체인 조회 태스크 실패: {e}"))??;
 
-    // 1) Keystone 토큰 (실패 시 실행 자체를 시작하지 않음)
-    let ks = Arc::new(KeystoneClient::new(
-        reqwest::Client::new(),
-        KeystoneAuth {
-            auth_url: env.keystone_url.clone(),
-            user_name: env.user_name.clone(),
-            user_domain: env.user_domain.clone(),
-            password,
-            project_name: env.project_name.clone(),
-            project_domain: env.project_domain.clone(),
-        },
-    ));
-    let token = ks.get_token().await?;
-
-    // 2) MQ 소비자 시작 (설계: 접속 실패 시 실행 시작 실패)
-    let bus = EventBus::new();
-    let cancel = CancellationToken::new();
-    let exchanges: Vec<String> = env
-        .mq_exchanges
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone()).await?;
-
-    // 3) 내장 변수
-    let mut vars = Vars::new();
-    vars.insert("auth_token".into(), token);
-    for (svc, url) in &env.endpoints {
-        vars.insert(format!("base_url.{svc}"), url.trim_end_matches('/').to_string());
+    // 사용자 제공 변수(예: auth_token) — 환경 없이 실행(Postman식) 시 사용
+    let mut run_vars = Vars::new();
+    if let Some(v) = vars {
+        for (k, val) in v {
+            run_vars.insert(k, val);
+        }
     }
 
-    // 4) run 레코드 생성 + 백그라운드 실행
-    let run_id = state.db.lock().unwrap().create_run(scenario_id, env_id, &now())?;
-    state.active_runs.lock().unwrap().insert(run_id, cancel.clone());
+    let bus = EventBus::new();
+    let cancel = CancellationToken::new();
+    let mut refresher: Option<TokenRefresher> = None;
 
-    let refresher: TokenRefresher = {
-        let ks = ks.clone();
-        Arc::new(move || {
-            let ks = ks.clone();
+    if let Some(eid) = env_id {
+        // 환경 모드: Keystone 인증 + MQ 소비 + base_url 변수
+        let env = state.db.lock().unwrap().get_environment(eid)?;
+        // OS 키체인은 사용자 승인 모달로 무기한 블록될 수 있어 블로킹 워커에서 격리
+        let password = tauri::async_runtime::spawn_blocking(move || store::get_password(eid))
+            .await
+            .map_err(|e| format!("키체인 조회 태스크 실패: {e}"))??;
+        let ks = Arc::new(KeystoneClient::new(
+            reqwest::Client::new(),
+            KeystoneAuth {
+                auth_url: env.keystone_url.clone(),
+                user_name: env.user_name.clone(),
+                user_domain: env.user_domain.clone(),
+                password,
+                project_name: env.project_name.clone(),
+                project_domain: env.project_domain.clone(),
+            },
+        ));
+        // Keystone 토큰 (실패 시 실행 자체를 시작하지 않음). 환경 토큰이 사용자 제공 토큰을 덮는다.
+        let token = ks.get_token().await?;
+        run_vars.insert("auth_token".into(), token);
+        // MQ 소비자 시작 (설계: 접속 실패 시 실행 시작 실패)
+        let exchanges: Vec<String> = env
+            .mq_exchanges
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone()).await?;
+        // base_url 변수
+        for (svc, url) in &env.endpoints {
+            run_vars.insert(format!("base_url.{svc}"), url.trim_end_matches('/').to_string());
+        }
+        let ks2 = ks.clone();
+        refresher = Some(Arc::new(move || {
+            let ks = ks2.clone();
             Box::pin(async move { ks.refresh_token().await })
-        })
-    };
+        }));
+    }
+    // else: 환경 없이 단순 실행(Postman식) — Keystone/MQ/base_url 생략, 사용자 제공 vars만 사용
+
+    // run 레코드 생성 (환경 없으면 env_id=0 센티넬) + 백그라운드 실행
+    let run_id = state
+        .db
+        .lock()
+        .unwrap()
+        .create_run(scenario_id, env_id.unwrap_or(0), &now())?;
+    state.active_runs.lock().unwrap().insert(run_id, cancel.clone());
 
     let sink = TauriSink { app: app.clone(), run_id };
     let input = RunInput {
         scenario,
-        vars,
+        vars: run_vars,
         bus,
         cancel: cancel.clone(),
-        token_refresher: Some(refresher),
+        token_refresher: refresher,
     };
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {

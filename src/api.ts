@@ -15,8 +15,8 @@ export const importScenario = (path: string) => invoke<number>('import_scenario'
 export const listRuns = () => invoke<RunRecord[]>('list_runs')
 export const listStepResults = (runId: number) => invoke<StepResultRecord[]>('list_step_results', { runId })
 
-export const runScenario = (scenarioId: number, envId: number) =>
-  invoke<number>('run_scenario', { scenarioId, envId })
+export const runScenario = (scenarioId: number, envId: number | null, vars?: Record<string, string>) =>
+  invoke<number>('run_scenario', { scenarioId, envId, vars })
 export const cancelRun = (runId: number) => invoke<void>('cancel_run', { runId })
 
 export const startCaptureSession = (url: string) => invoke<void>('start_capture_session', { url })

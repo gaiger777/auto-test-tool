@@ -17,7 +17,7 @@ export interface UseRun {
   error: string
   running: boolean
   activeScenarioId: number | null
-  start: (rec: ScenarioRecord, envId: number) => Promise<void>
+  start: (rec: ScenarioRecord, envId: number | null, vars?: Record<string, string>) => Promise<void>
   cancel: () => void
 }
 
@@ -79,7 +79,7 @@ export function useRun(): UseRun {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const start = async (rec: ScenarioRecord, envId: number) => {
+  const start = async (rec: ScenarioRecord, envId: number | null, vars?: Record<string, string>) => {
     setError('')
     let steps: StepDef[]
     try {
@@ -96,7 +96,7 @@ export function useRun(): UseRun {
     pendingRef.current = true
     cancelWantedRef.current = false
     try {
-      const id = await api.runScenario(rec.id!, envId)
+      const id = await api.runScenario(rec.id!, envId, vars)
       if (runIdRef.current === null) runIdRef.current = id
       flushQueuedCancel(id)
     } catch (e) {
