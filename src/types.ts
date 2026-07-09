@@ -61,3 +61,6 @@ export interface UiAction {
   url: string
   timestamp: number
 }
+
+// UI 재생 스텝 결과 (index = -1 은 재생 종료 신호)
+export interface UiStepResult { index: number; status: 'passed' | 'failed'; detail: string; done: boolean }

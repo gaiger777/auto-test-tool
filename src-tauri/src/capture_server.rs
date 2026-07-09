@@ -34,3 +34,13 @@ pub struct UiAction {
     pub url: String,
     pub timestamp: i64,
 }
+
+/// UI 재생 중 한 스텝의 결과. 플레이어 스크립트가 `ui_replay_step` 커맨드로 보고한다.
+/// index = -1 은 재생 전체 종료 신호(done=true).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UiStepResult {
+    pub index: i64,
+    pub status: String, // "passed" | "failed"
+    pub detail: String,
+    pub done: bool,
+}

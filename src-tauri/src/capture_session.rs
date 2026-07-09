@@ -170,6 +170,105 @@ pub fn recorder_script(token: &str) -> String {
     )
 }
 
+/// 기록된 UI 동작을 재생 웹뷰("replay")에서 실행하는 플레이어 스크립트를 만든다.
+/// 셀렉터 사다리를 순서대로 시도(자가치유)하고, actionability(보임·안정·활성)까지 대기한 뒤
+/// 클릭/입력을 수행한다. 스텝 사이에 네트워크 idle을 기다리고, sessionStorage로 진행 상태를
+/// 저장해 페이지 네비게이션을 넘어 재개한다. 결과는 IPC(ui_replay_step)로 보고한다.
+/// (format! 대신 placeholder 치환 — JS 중괄호가 많아 이스케이프 회피)
+pub fn player_script(token: &str, actions_json: &str) -> String {
+    const BODY: &str = r#####"(function(){
+  var TOKEN = "__TOKEN__";
+  var ACTIONS = __ACTIONS__;
+  function inv(cmd, args){ try{ if(window.__TAURI_INTERNALS__) return window.__TAURI_INTERNALS__.invoke(cmd, args); }catch(e){} return Promise.resolve(); }
+  function report(index, status, detail, done){ inv("ui_replay_step", { token: TOKEN, result: { index: index, status: status, detail: (detail||""), done: !!done } }); }
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  // 네트워크 in-flight 카운터
+  var inflight = 0;
+  var of = window.fetch;
+  if (of) window.fetch = function(){ inflight++; var p = of.apply(this, arguments); Promise.resolve(p).then(function(){ inflight=Math.max(0,inflight-1); }, function(){ inflight=Math.max(0,inflight-1); }); return p; };
+  var xs = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function(){ inflight++; this.addEventListener("loadend", function(){ inflight=Math.max(0,inflight-1); }); return xs.apply(this, arguments); };
+  async function waitNetworkIdle(maxMs){ var t=0; while(t<maxMs){ if(inflight<=0){ await sleep(400); if(inflight<=0) return; } await sleep(120); t+=120; } }
+
+  function vtext(el){ return (el.textContent||"").trim().replace(/\s+/g," "); }
+  function roleOf(el){ var r=el.getAttribute("role"); if(r) return r; var t=el.tagName.toLowerCase();
+    if(t==="button") return "button"; if(t==="a"&&el.hasAttribute("href")) return "link"; if(t==="select") return "combobox";
+    if(t==="textarea") return "textbox"; if(t==="input"){ var ty=(el.getAttribute("type")||"text").toLowerCase();
+      if(ty==="checkbox") return "checkbox"; if(ty==="radio") return "radio"; if(ty==="submit"||ty==="button") return "button"; return "textbox"; } return ""; }
+  function nameOf(el){ var a=(el.getAttribute("aria-label")||"").trim(); if(a) return a;
+    if(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT") return (el.getAttribute("placeholder")||el.getAttribute("name")||(el.labels&&el.labels[0]&&el.labels[0].textContent)||"").trim().slice(0,60);
+    return vtext(el).slice(0,60) || (el.value||""); }
+  function bySel(sel){
+    try{
+      if(sel.strategy==="testid") return document.querySelector('[data-testid="'+sel.value+'"],[data-test="'+sel.value+'"],[data-cy="'+sel.value+'"]');
+      if(sel.strategy==="id") return document.getElementById(sel.value);
+      if(sel.strategy==="name"||sel.strategy==="css") return document.querySelector(sel.value);
+      if(sel.strategy==="role"){ var p=sel.value.split("|"); var role=p[0], nm=(p.slice(1).join("|"));
+        var all=document.querySelectorAll('a,button,input,select,textarea,[role]');
+        for(var i=0;i<all.length;i++){ if(roleOf(all[i])===role && nameOf(all[i])===nm) return all[i]; } return null; }
+      if(sel.strategy==="text"){ var els=document.querySelectorAll('a,button,[role=button],summary,label');
+        for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
+    }catch(e){}
+    return null;
+  }
+  function resolve(sels){ for(var i=0;i<sels.length;i++){ var el=bySel(sels[i]); if(el) return el; } return null; }
+  function isVisible(el){ if(!el) return false; var r=el.getBoundingClientRect(); var st=getComputedStyle(el);
+    return r.width>0 && r.height>0 && st.visibility!=="hidden" && st.display!=="none" && parseFloat(st.opacity||"1")>0.01; }
+  async function waitActionable(sels, maxMs){
+    var t=0, lastRect=null;
+    while(t<maxMs){
+      var el=resolve(sels);
+      if(el && !el.disabled){
+        try{ el.scrollIntoView({block:"center", inline:"nearest"}); }catch(e){}
+        if(isVisible(el)){
+          var r=el.getBoundingClientRect();
+          if(lastRect && Math.abs(r.top-lastRect.top)<2 && Math.abs(r.left-lastRect.left)<2) return el;
+          lastRect=r;
+        } else lastRect=null;
+      } else lastRect=null;
+      await sleep(120); t+=120;
+    }
+    return null;
+  }
+  function setNativeValue(el, value){
+    var proto = el.tagName==="TEXTAREA" ? window.HTMLTextAreaElement.prototype : (el.tagName==="SELECT" ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype);
+    var d = Object.getOwnPropertyDescriptor(proto, "value");
+    if(d && d.set) d.set.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event("input", {bubbles:true}));
+    el.dispatchEvent(new Event("change", {bubbles:true}));
+  }
+  async function perform(a, el){
+    try{ el.scrollIntoView({block:"center"}); }catch(e){}
+    await sleep(60);
+    if(a.kind==="input") setNativeValue(el, a.value!=null?a.value:"");
+    else el.click();
+  }
+  async function runFrom(start){
+    for(var i=start;i<ACTIONS.length;i++){
+      var a=ACTIONS[i];
+      var el=await waitActionable(a.selectors, 8000);
+      if(!el){ report(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return; }
+      try{ await perform(a, el); report(i, "passed", (a.kind==="input"?"입력: ":"클릭: ")+(a.name||"")); }
+      catch(e){ report(i, "failed", String(e)); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return; }
+      sessionStorage.setItem("__replay_idx", String(i+1));
+      await waitNetworkIdle(6000);
+      await sleep(300);
+    }
+    report(-1, "passed", "재생 완료", true);
+  }
+  function boot(){
+    if(sessionStorage.getItem("__replay_runid") !== TOKEN){ sessionStorage.setItem("__replay_runid", TOKEN); sessionStorage.setItem("__replay_idx", "0"); }
+    var idx = parseInt(sessionStorage.getItem("__replay_idx")||"0", 10);
+    if(idx >= ACTIONS.length) return;
+    setTimeout(function(){ runFrom(idx); }, 700);
+  }
+  if(document.readyState==="complete"||document.readyState==="interactive") boot();
+  else window.addEventListener("DOMContentLoaded", boot);
+})();"#####;
+    BODY.replace("__TOKEN__", token).replace("__ACTIONS__", actions_json)
+}
+
 /// 대상 URL을 캡처 웹뷰 창("capture")으로 열고 후킹 스크립트를 주입한다.
 pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::WebviewWindow, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;

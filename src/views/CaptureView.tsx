@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import * as api from '../api'
 import { capturesToSteps, type CapturedCall } from '../capture'
-import type { ScenarioRecord, UiAction } from '../types'
+import type { ScenarioRecord, UiAction, UiStepResult } from '../types'
 
 export default function CaptureView() {
   const [url, setUrl] = useState('')
@@ -10,6 +10,8 @@ export default function CaptureView() {
   const [active, setActive] = useState(false)
   const [calls, setCalls] = useState<CapturedCall[]>([])
   const [uiActions, setUiActions] = useState<UiAction[]>([])
+  const [replaying, setReplaying] = useState(false)
+  const [replayResults, setReplayResults] = useState<Record<number, { status: string; detail: string }>>({})
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [scenarioName, setScenarioName] = useState('')
   const [error, setError] = useState('')
@@ -22,13 +24,23 @@ export default function CaptureView() {
       setCalls(prev => [e.payload, ...prev])
     })
     const unUi = listen<UiAction>('ui-recorded', e => {
-      setUiActions(prev => [...prev, e.payload]) // 순서대로(위=먼저) 쌓는다
+      setUiActions(prev => [...prev, e.payload]) // 순서대로(위=먼저)
+    })
+    const unReplay = listen<UiStepResult>('ui-replay-step', e => {
+      const r = e.payload
+      if (r.done) {
+        setReplaying(false)
+        setNotice(r.status === 'passed' ? 'UI 재생 완료' : `UI 재생 중단: ${r.detail}`)
+      } else {
+        setReplayResults(prev => ({ ...prev, [r.index]: { status: r.status, detail: r.detail } }))
+      }
     })
     const unEnd = listen('capture-session-ended', () => {
       setActive(false)
-      setNotice('캡처 세션이 종료되었습니다. 목록은 유지되며 변환할 수 있습니다.')
+      setReplaying(false)
+      setNotice('세션이 종료되었습니다. 목록은 유지됩니다.')
     })
-    return () => { unRec.then(u => u()); unUi.then(u => u()); unEnd.then(u => u()) }
+    return () => { unRec.then(u => u()); unUi.then(u => u()); unReplay.then(u => u()); unEnd.then(u => u()) }
   }, [])
 
   const start = async () => {
@@ -38,7 +50,7 @@ export default function CaptureView() {
       await api.startCaptureSession(url)
       setActive(true)
       startedAt.current = Date.now()
-      setCalls([]); setUiActions([]); setSelected({})
+      setCalls([]); setUiActions([]); setSelected({}); setReplayResults({})
     } catch (e) { setError(String(e)) }
   }
 
@@ -50,6 +62,15 @@ export default function CaptureView() {
         setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
       }
     } catch (e) { setError(String(e)) }
+  }
+
+  const replay = async () => {
+    setError(''); setNotice(''); setReplayResults({})
+    if (uiActions.length === 0) { setError('재생할 UI 동작이 없습니다'); return }
+    setReplaying(true)
+    const startUrl = uiActions[0]?.url || url
+    try { await api.startUiReplay(startUrl, uiActions) }
+    catch (e) { setReplaying(false); setError(String(e)) }
   }
 
   const toggle = (id: string) => setSelected(s => ({ ...s, [id]: !s[id] }))
@@ -72,16 +93,22 @@ export default function CaptureView() {
     } catch (e) { setError(String(e)) }
   }
 
+  const resultIcon = (i: number) => {
+    const r = replayResults[i]
+    if (r) return r.status === 'passed' ? '✅' : '❌'
+    return replaying ? '⏳' : ''
+  }
+
   return (
     <div>
       <h2>네트워크 캡처 + UI 레코더</h2>
       <div className="add-row">
         <input placeholder="대상 사이트 URL (https://...)" value={url}
-          onChange={e => setUrl(e.target.value)} disabled={active} style={{ minWidth: 320 }} />
+          onChange={e => setUrl(e.target.value)} disabled={active || replaying} style={{ minWidth: 320 }} />
         <input placeholder="토큰 헤더명" value={tokenHeader}
           onChange={e => setTokenHeader(e.target.value)} />
         {!active
-          ? <button className="accent" onClick={start}>세션 시작</button>
+          ? <button className="accent" onClick={start} disabled={replaying}>세션 시작</button>
           : <button className="danger" onClick={stop}>세션 종료</button>}
       </div>
 
@@ -114,10 +141,16 @@ export default function CaptureView() {
         </div>
 
         <div>
-          <h3>UI 동작 ({uiActions.length})</h3>
-          <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. (재생은 다음 단계)</p>
+          <h3>
+            UI 동작 ({uiActions.length})
+            <button className="accent" style={{ marginLeft: 10 }}
+              disabled={active || replaying || uiActions.length === 0} onClick={replay}>
+              {replaying ? '재생 중…' : '▶ 재생'}
+            </button>
+          </h3>
+          <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. ▶ 재생으로 그대로 실행합니다.</p>
           <table className="history">
-            <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th></tr></thead>
+            <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th></tr></thead>
             <tbody>
               {uiActions.map((a, i) => (
                 <tr key={a.id}>
@@ -128,6 +161,7 @@ export default function CaptureView() {
                     {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
                   </td>
                   <td>{a.value ?? ''}</td>
+                  <td title={replayResults[i]?.detail || ''}>{resultIcon(i)}</td>
                 </tr>
               ))}
             </tbody>

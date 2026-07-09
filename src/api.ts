@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { Environment, RunRecord, ScenarioRecord, StepResultRecord } from './types'
+import type { Environment, RunRecord, ScenarioRecord, StepResultRecord, UiAction } from './types'
 
 export const listEnvironments = () => invoke<Environment[]>('list_environments')
 export const saveEnvironment = (env: Environment, password: string | null) =>
@@ -22,3 +22,6 @@ export const cancelRun = (runId: number) => invoke<void>('cancel_run', { runId }
 export const startCaptureSession = (url: string) => invoke<void>('start_capture_session', { url })
 export const stopCaptureSession = () => invoke<void>('stop_capture_session')
 export const captureSessionActive = () => invoke<boolean>('capture_session_active')
+
+export const startUiReplay = (url: string, actions: UiAction[]) =>
+  invoke<void>('start_ui_replay', { url, actions })

@@ -391,6 +391,87 @@ pub fn ui_record(
     Ok(())
 }
 
+/// 기록된 UI 동작을 재생 웹뷰("replay")에서 실행한다. (셀렉터 자가치유 + actionability 대기)
+#[tauri::command]
+pub fn start_ui_replay(
+    app: AppHandle,
+    state: State<AppState>,
+    url: String,
+    actions: Vec<capture_server::UiAction>,
+) -> Result<(), String> {
+    if actions.is_empty() {
+        return Err("재생할 UI 동작이 없습니다".into());
+    }
+    let token = generate_capture_token();
+    {
+        let mut guard = state.capture.lock().unwrap();
+        if guard.is_some() {
+            return Err("이미 진행 중인 세션이 있습니다 (캡처/재생)".into());
+        }
+        *guard = Some(CaptureHandle {
+            id: token.clone(),
+            cancel: CancellationToken::new(),
+            seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        });
+    }
+    if let Some(win) = app.get_webview_window("replay") {
+        let _ = win.close();
+    }
+    let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
+    let script = capture_session::player_script(&token, &json);
+    let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
+    let window = match tauri::WebviewWindowBuilder::new(
+        &app,
+        "replay",
+        tauri::WebviewUrl::External(parsed),
+    )
+    .title("UI 재생")
+    .initialization_script(&script)
+    .build()
+    {
+        Ok(w) => w,
+        Err(e) => {
+            let mut guard = state.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+                guard.take();
+            }
+            return Err(format!("재생 창 생성 실패: {e}"));
+        }
+    };
+    let app_close = app.clone();
+    let my_id = token.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            let st = app_close.state::<AppState>();
+            let mut guard = st.capture.lock().unwrap();
+            if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
+                guard.take();
+                drop(guard);
+                let _ = app_close.emit("capture-session-ended", ());
+            }
+        }
+    });
+    Ok(())
+}
+
+/// 재생 웹뷰의 플레이어가 IPC로 보고하는 스텝 결과를 수집한다.
+#[tauri::command]
+pub fn ui_replay_step(
+    app: AppHandle,
+    state: State<AppState>,
+    token: String,
+    result: capture_server::UiStepResult,
+) -> Result<(), String> {
+    {
+        let guard = state.capture.lock().unwrap();
+        if !guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
+            return Err("활성 세션 아님".into());
+        }
+    }
+    let _ = app.emit("ui-replay-step", result);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn stop_capture_session(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     // 락을 먼저 놓고 창을 닫아 Destroyed 핸들러와의 재진입 데드락을 피한다
