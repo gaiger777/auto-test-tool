@@ -49,3 +49,15 @@ export interface StepResultRecord {
 }
 
 export interface StepOutcome { index: number; name: string; status: StepStatus; detail: string; duration_ms: number }
+
+// UI 레코더: 캡처 창에서 사용자의 클릭/입력을 기록한 것
+export interface UiSelector { strategy: string; value: string }
+export interface UiAction {
+  id: string
+  kind: 'click' | 'input'
+  selectors: UiSelector[]
+  name: string
+  value: string | null
+  url: string
+  timestamp: number
+}

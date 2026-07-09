@@ -73,7 +73,8 @@ pub fn run() {
             commands::start_capture_session,
             commands::stop_capture_session,
             commands::capture_session_active,
-            commands::capture_push
+            commands::capture_push,
+            commands::ui_record
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

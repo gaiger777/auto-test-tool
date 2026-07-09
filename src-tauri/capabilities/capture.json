@@ -6,5 +6,5 @@
   "remote": {
     "urls": ["https://*.okestro.cloud", "https://*.okestro-k8s.com"]
   },
-  "permissions": ["allow-capture-push"]
+  "permissions": ["allow-capture-push", "allow-ui-record"]
 }

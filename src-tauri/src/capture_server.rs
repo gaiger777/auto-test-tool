@@ -14,3 +14,23 @@ pub struct CapturedCall {
     pub response_body: Option<String>,
     pub timestamp: i64,
 }
+
+/// 요소를 찾는 후보 셀렉터 하나. 재생 시 우선순위대로 시도(자가치유)한다.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UiSelector {
+    pub strategy: String, // "testid" | "id" | "name" | "role" | "text" | "css"
+    pub value: String,
+}
+
+/// 사용자가 캡처 창에서 한 UI 조작 하나 (클릭/입력).
+/// 레코더 스크립트가 `ui_record` 커맨드로 전달한다.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UiAction {
+    pub id: String,
+    pub kind: String, // "click" | "input"
+    pub selectors: Vec<UiSelector>,
+    pub name: String,
+    pub value: Option<String>,
+    pub url: String,
+    pub timestamp: i64,
+}

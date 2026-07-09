@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import * as api from '../api'
 import { capturesToSteps, type CapturedCall } from '../capture'
-import type { ScenarioRecord } from '../types'
+import type { ScenarioRecord, UiAction } from '../types'
 
 export default function CaptureView() {
   const [url, setUrl] = useState('')
   const [tokenHeader, setTokenHeader] = useState('X-Auth-Token')
   const [active, setActive] = useState(false)
   const [calls, setCalls] = useState<CapturedCall[]>([])
+  const [uiActions, setUiActions] = useState<UiAction[]>([])
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [scenarioName, setScenarioName] = useState('')
   const [error, setError] = useState('')
@@ -20,11 +21,14 @@ export default function CaptureView() {
     const unRec = listen<CapturedCall>('capture-recorded', e => {
       setCalls(prev => [e.payload, ...prev])
     })
+    const unUi = listen<UiAction>('ui-recorded', e => {
+      setUiActions(prev => [...prev, e.payload]) // 순서대로(위=먼저) 쌓는다
+    })
     const unEnd = listen('capture-session-ended', () => {
       setActive(false)
       setNotice('캡처 세션이 종료되었습니다. 목록은 유지되며 변환할 수 있습니다.')
     })
-    return () => { unRec.then(u => u()); unEnd.then(u => u()) }
+    return () => { unRec.then(u => u()); unUi.then(u => u()); unEnd.then(u => u()) }
   }, [])
 
   const start = async () => {
@@ -34,7 +38,7 @@ export default function CaptureView() {
       await api.startCaptureSession(url)
       setActive(true)
       startedAt.current = Date.now()
-      setCalls([]); setSelected({})
+      setCalls([]); setUiActions([]); setSelected({})
     } catch (e) { setError(String(e)) }
   }
 
@@ -42,7 +46,7 @@ export default function CaptureView() {
     try {
       await api.stopCaptureSession()
       setActive(false)
-      if (calls.length === 0 && Date.now() - startedAt.current > 3000) {
+      if (calls.length === 0 && uiActions.length === 0 && Date.now() - startedAt.current > 3000) {
         setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
       }
     } catch (e) { setError(String(e)) }
@@ -70,14 +74,14 @@ export default function CaptureView() {
 
   return (
     <div>
-      <h2>네트워크 캡처</h2>
+      <h2>네트워크 캡처 + UI 레코더</h2>
       <div className="add-row">
         <input placeholder="대상 사이트 URL (https://...)" value={url}
           onChange={e => setUrl(e.target.value)} disabled={active} style={{ minWidth: 320 }} />
         <input placeholder="토큰 헤더명" value={tokenHeader}
           onChange={e => setTokenHeader(e.target.value)} />
         {!active
-          ? <button onClick={start}>세션 시작</button>
+          ? <button className="accent" onClick={start}>세션 시작</button>
           : <button className="danger" onClick={stop}>세션 종료</button>}
       </div>
 
@@ -87,25 +91,49 @@ export default function CaptureView() {
       <div className="add-row">
         <input placeholder="새 시나리오 이름 (비우면 자동)" value={scenarioName}
           onChange={e => setScenarioName(e.target.value)} style={{ minWidth: 240 }} />
-        <button onClick={addToScenario}>선택 항목을 시나리오로 저장</button>
-        <span className="dim">캡처 {calls.length}건 · 선택 {Object.values(selected).filter(Boolean).length}건</span>
+        <button onClick={addToScenario}>선택 네트워크 호출을 시나리오로 저장</button>
+        <span className="dim">네트워크 {calls.length}건 · 선택 {Object.values(selected).filter(Boolean).length}건</span>
       </div>
 
-      <table className="history">
-        <thead>
-          <tr><th></th><th>메서드</th><th>URL</th><th>상태</th></tr>
-        </thead>
-        <tbody>
-          {calls.map(c => (
-            <tr key={c.id}>
-              <td><input type="checkbox" checked={!!selected[c.id]} onChange={() => toggle(c.id)} /></td>
-              <td>{c.method}</td>
-              <td>{c.url}</td>
-              <td>{c.status}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="two-col" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <div>
+          <h3>네트워크 호출 ({calls.length})</h3>
+          <table className="history">
+            <thead><tr><th></th><th>메서드</th><th>URL</th><th>상태</th></tr></thead>
+            <tbody>
+              {calls.map(c => (
+                <tr key={c.id}>
+                  <td><input type="checkbox" checked={!!selected[c.id]} onChange={() => toggle(c.id)} /></td>
+                  <td>{c.method}</td>
+                  <td>{c.url}</td>
+                  <td>{c.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h3>UI 동작 ({uiActions.length})</h3>
+          <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. (재생은 다음 단계)</p>
+          <table className="history">
+            <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th></tr></thead>
+            <tbody>
+              {uiActions.map((a, i) => (
+                <tr key={a.id}>
+                  <td>{i + 1}</td>
+                  <td>{a.kind === 'click' ? '클릭' : '입력'}</td>
+                  <td>{a.name}</td>
+                  <td className="dim" title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n')}>
+                    {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
+                  </td>
+                  <td>{a.value ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }

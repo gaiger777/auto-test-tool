@@ -309,7 +309,12 @@ pub fn start_capture_session(
         let _ = win.close();
     }
 
-    let script = capture_session::hook_script(&token);
+    // 네트워크 후킹 + UI 레코더를 함께 주입한다 (한 세션에서 네트워크·UI를 같이 기록).
+    let script = format!(
+        "{}\n{}",
+        capture_session::hook_script(&token),
+        capture_session::recorder_script(&token)
+    );
     let window = match capture_session::open_capture_window(&app, &url, script) {
         Ok(w) => w,
         Err(e) => {
@@ -362,6 +367,27 @@ pub fn capture_push(
     let n = seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     call.id = format!("s{n}");
     let _ = app.emit("capture-recorded", call);
+    Ok(())
+}
+
+/// 캡처 웹뷰의 레코더 스크립트가 IPC로 밀어넣는 UI 조작을 수집한다.
+#[tauri::command]
+pub fn ui_record(
+    app: AppHandle,
+    state: State<AppState>,
+    token: String,
+    mut action: capture_server::UiAction,
+) -> Result<(), String> {
+    let seq = {
+        let guard = state.capture.lock().unwrap();
+        match guard.as_ref() {
+            Some(h) if h.id == token => h.seq.clone(),
+            _ => return Err("활성 캡처 세션이 아니거나 토큰 불일치".into()),
+        }
+    };
+    let n = seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    action.id = format!("u{n}");
+    let _ = app.emit("ui-recorded", action);
     Ok(())
 }
 

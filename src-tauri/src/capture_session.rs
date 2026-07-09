@@ -83,6 +83,93 @@ pub fn hook_script(token: &str) -> String {
     )
 }
 
+/// 캡처 창에서 사용자의 UI 조작(클릭/입력)을 기록하는 스크립트를 만든다.
+/// 각 요소에 대해 우선순위 셀렉터 사다리(testid→id→name→role→text→css)를 만들어
+/// IPC(`invoke("ui_record", ...)`)로 전달한다. 재생 시 이 후보들을 순서대로 시도(자가치유)한다.
+pub fn recorder_script(token: &str) -> String {
+    format!(
+        r##"(function() {{
+  var TOKEN = "{token}";
+  var uiseq = 0;
+  function send(action) {{
+    try {{
+      if (window.__TAURI_INTERNALS__) {{
+        window.__TAURI_INTERNALS__.invoke("ui_record", {{ token: TOKEN, action: action }}).catch(function(){{}});
+      }}
+    }} catch (e) {{}}
+  }}
+  function esc(s) {{ return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&"); }}
+  function stableId(id) {{ return id && !/^[0-9]/.test(id) && !/[0-9a-f]{{6,}}/i.test(id) && id.length < 40; }}
+  function stableClass(c) {{ return c && !/^(css-|sc-|jss|makeStyles|_)/.test(c) && !/[0-9a-f]{{5,}}/i.test(c) && !/\d{{3,}}/.test(c); }}
+  function nameOf(el) {{
+    var a = (el.getAttribute("aria-label") || "").trim(); if (a) return a;
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")
+      return (el.getAttribute("placeholder") || el.getAttribute("name") ||
+              (el.labels && el.labels[0] && el.labels[0].textContent) || "").trim().slice(0, 60);
+    return (el.textContent || el.value || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  }}
+  function roleOf(el) {{
+    var r = el.getAttribute("role"); if (r) return r;
+    var t = el.tagName.toLowerCase();
+    if (t === "button") return "button";
+    if (t === "a" && el.hasAttribute("href")) return "link";
+    if (t === "select") return "combobox";
+    if (t === "textarea") return "textbox";
+    if (t === "input") {{ var ty = (el.getAttribute("type") || "text").toLowerCase();
+      if (ty === "checkbox") return "checkbox"; if (ty === "radio") return "radio";
+      if (ty === "submit" || ty === "button") return "button"; return "textbox"; }}
+    return "";
+  }}
+  function cssPath(el) {{
+    var parts = [], node = el, depth = 0;
+    while (node && node.nodeType === 1 && depth < 5) {{
+      if (node.id && stableId(node.id)) {{ parts.unshift("#" + esc(node.id)); break; }}
+      var sel = node.tagName.toLowerCase();
+      var cls = Array.prototype.filter.call(node.classList || [], stableClass);
+      if (cls.length) sel += "." + cls.slice(0, 2).map(esc).join(".");
+      var p = node.parentElement;
+      if (p) {{
+        var same = Array.prototype.filter.call(p.children, function(c) {{ return c.tagName === node.tagName; }});
+        if (same.length > 1) sel += ":nth-of-type(" + (Array.prototype.indexOf.call(p.children, node) + 1) + ")";
+      }}
+      parts.unshift(sel);
+      node = node.parentElement; depth++;
+    }}
+    return parts.join(" > ");
+  }}
+  function ladder(el) {{
+    var out = [];
+    var tid = el.getAttribute("data-testid") || el.getAttribute("data-test") || el.getAttribute("data-cy");
+    if (tid) out.push({{ strategy: "testid", value: tid }});
+    if (el.id && stableId(el.id)) out.push({{ strategy: "id", value: el.id }});
+    if (el.getAttribute("name")) out.push({{ strategy: "name", value: el.tagName.toLowerCase() + "[name=" + el.getAttribute("name") + "]" }});
+    var role = roleOf(el), nm = nameOf(el);
+    if (role && nm) out.push({{ strategy: "role", value: role + "|" + nm }});
+    if (nm && (role === "button" || role === "link")) out.push({{ strategy: "text", value: nm }});
+    out.push({{ strategy: "css", value: cssPath(el) }});
+    return out;
+  }}
+  function record(kind, el, value) {{
+    if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
+    send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
+            value: (value != null ? String(value) : null), url: location.href, timestamp: Date.now() }});
+  }}
+  document.addEventListener("click", function(e) {{
+    var el = e.target;
+    var actionable = el.closest ? el.closest("a,button,[role=button],[onclick],input,select,label,summary,[tabindex]") : null;
+    record("click", actionable || el, null);
+  }}, true);
+  document.addEventListener("change", function(e) {{
+    var el = e.target;
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT")) return;
+    var ty = (el.getAttribute("type") || "").toLowerCase();
+    var val = (ty === "password") ? "" : el.value; // 비밀번호 값은 기록하지 않음
+    record("input", el, val);
+  }}, true);
+}})();"##
+    )
+}
+
 /// 대상 URL을 캡처 웹뷰 창("capture")으로 열고 후킹 스크립트를 주입한다.
 pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::WebviewWindow, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
