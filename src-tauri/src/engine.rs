@@ -52,6 +52,9 @@ pub async fn run(input: RunInput, sink: &dyn ProgressSink) -> Vec<StepOutcome> {
     // (장시간 대기는 http_call이 아니라 wait_event의 몫)
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        // 내부 dev 서버들의 사설 CA·호스트명 불일치 인증서를 허용 (Postman SSL 검증 끄기와 동일).
+        // 내부 서버 대상 테스트 툴 한정 다운그레이드 — cert_bypass(웹뷰)와 동일 posture.
+        .danger_accept_invalid_certs(true)
         .build()
         .expect("reqwest client 생성 실패");
     let mut outcomes = Vec::new();

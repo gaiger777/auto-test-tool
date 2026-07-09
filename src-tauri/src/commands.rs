@@ -177,7 +177,10 @@ pub async fn run_scenario(
             .await
             .map_err(|e| format!("키체인 조회 태스크 실패: {e}"))??;
         let ks = Arc::new(KeystoneClient::new(
-            reqwest::Client::new(),
+            reqwest::Client::builder()
+                .danger_accept_invalid_certs(true) // 내부 서버 사설 CA 허용
+                .build()
+                .map_err(|e| format!("HTTP 클라이언트 생성 실패: {e}"))?,
             KeystoneAuth {
                 auth_url: env.keystone_url.clone(),
                 user_name: env.user_name.clone(),
