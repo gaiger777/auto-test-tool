@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 캡처한 UI 플로우 내보내기 데이터 (비밀번호·토큰 평문 포함 — 커밋 금지)
+senario/

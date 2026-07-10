@@ -45,6 +45,21 @@ pub struct StepResultRecord {
     pub duration_ms: i64,
 }
 
+/// DB에 저장된 UI 동작 플로우 (사이트 URL별, 이름 유니크).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UiFlowRecord {
+    pub id: Option<i64>,
+    pub name: String,
+    pub site_url: String,
+    pub actions_json: String, // UiAction[] JSON
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UiFlowSite {
+    pub site_url: String,
+    pub count: i64,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -96,6 +111,14 @@ impl Store {
                status TEXT NOT NULL,
                detail TEXT NOT NULL,
                duration_ms INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS ui_flows (
+               id INTEGER PRIMARY KEY,
+               name TEXT NOT NULL,
+               site_url TEXT NOT NULL,
+               actions_json TEXT NOT NULL,
+               updated_at TEXT NOT NULL,
+               UNIQUE(site_url, name)
              );",
         )
         .map_err(|e| e.to_string())?;
@@ -235,6 +258,76 @@ impl Store {
     pub fn delete_scenario(&self, id: i64) -> Result<(), String> {
         self.conn
             .execute("DELETE FROM scenarios WHERE id=?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // --- ui_flows (UI 레코더 플로우) ---
+
+    pub fn save_ui_flow(
+        &self,
+        name: &str,
+        site_url: &str,
+        actions_json: &str,
+        updated_at: &str,
+    ) -> Result<i64, String> {
+        self.conn
+            .execute(
+                "INSERT INTO ui_flows (name, site_url, actions_json, updated_at) VALUES (?1,?2,?3,?4)
+                 ON CONFLICT(site_url, name) DO UPDATE SET actions_json=?3, updated_at=?4",
+                params![name, site_url, actions_json, updated_at],
+            )
+            .map_err(|e| e.to_string())?;
+        self.conn
+            .query_row(
+                "SELECT id FROM ui_flows WHERE site_url=?1 AND name=?2",
+                params![site_url, name],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn list_ui_flow_sites(&self) -> Result<Vec<UiFlowSite>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT site_url, COUNT(*) FROM ui_flows GROUP BY site_url ORDER BY site_url")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok(UiFlowSite { site_url: r.get(0)?, count: r.get(1)? }))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    fn map_ui_flow(r: &rusqlite::Row) -> rusqlite::Result<UiFlowRecord> {
+        Ok(UiFlowRecord {
+            id: Some(r.get(0)?),
+            name: r.get(1)?,
+            site_url: r.get(2)?,
+            actions_json: r.get(3)?,
+        })
+    }
+
+    pub fn list_ui_flows(&self, site_url: &str) -> Result<Vec<UiFlowRecord>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, site_url, actions_json FROM ui_flows WHERE site_url=?1 ORDER BY name")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![site_url], Self::map_ui_flow).map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn all_ui_flows(&self) -> Result<Vec<UiFlowRecord>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, site_url, actions_json FROM ui_flows ORDER BY site_url, name")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], Self::map_ui_flow).map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn delete_ui_flow(&self, id: i64) -> Result<(), String> {
+        self.conn
+            .execute("DELETE FROM ui_flows WHERE id=?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
     }

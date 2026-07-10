@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ui-record"
+description = "Enables the ui_record command without any pre-configured scope."
+commands.allow = ["ui_record"]
+
+[[permission]]
+identifier = "deny-ui-record"
+description = "Denies the ui_record command without any pre-configured scope."
+commands.deny = ["ui_record"]

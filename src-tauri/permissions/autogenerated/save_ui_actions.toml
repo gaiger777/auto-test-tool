@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-ui-actions"
+description = "Enables the save_ui_actions command without any pre-configured scope."
+commands.allow = ["save_ui_actions"]
+
+[[permission]]
+identifier = "deny-save-ui-actions"
+description = "Denies the save_ui_actions command without any pre-configured scope."
+commands.deny = ["save_ui_actions"]

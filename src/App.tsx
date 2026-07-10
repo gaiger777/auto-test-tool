@@ -6,11 +6,13 @@ import EnvironmentsView from './views/EnvironmentsView'
 import HistoryView from './views/HistoryView'
 import RunView from './views/RunView'
 import ScenarioBuilder from './views/ScenarioBuilder'
+import UiSuiteView from './views/UiSuiteView'
 
 const tabs = [
   { key: 'run', label: '실행', icon: 'play' },
   { key: 'scenarios', label: '시나리오', icon: 'list-tree' },
   { key: 'capture', label: '캡처', icon: 'record' },
+  { key: 'suite', label: 'UI 테스트', icon: 'beaker' },
   { key: 'envs', label: '환경', icon: 'server-environment' },
   { key: 'history', label: '히스토리', icon: 'history' },
 ] as const
@@ -41,6 +43,9 @@ export default function App() {
             <CaptureView />
           </div>
           {tab === 'scenarios' && <ScenarioBuilder />}
+          <div style={{ display: tab === 'suite' ? undefined : 'none' }}>
+            <UiSuiteView />
+          </div>
           {tab === 'envs' && <EnvironmentsView />}
           {tab === 'history' && <HistoryView />}
         </main>

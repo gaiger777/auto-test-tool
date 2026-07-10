@@ -49,3 +49,31 @@ export interface StepResultRecord {
 }
 
 export interface StepOutcome { index: number; name: string; status: StepStatus; detail: string; duration_ms: number }
+
+// UI 레코더: 캡처 창에서 사용자의 클릭/입력을 기록한 것
+export interface UiSelector { strategy: string; value: string }
+export interface UiCall {
+  method: string
+  url: string
+  status: number
+  request_headers?: Record<string, string>
+  request_body?: string | null
+}
+export interface UiAction {
+  id: string
+  kind: 'click' | 'input' | 'hover'
+  selectors: UiSelector[]
+  name: string
+  value: string | null
+  href?: string | null
+  api?: UiCall[]
+  url: string
+  timestamp: number
+}
+
+// UI 재생 스텝 결과 (index = -1 은 재생 종료 신호)
+export interface UiStepResult { index: number; status: 'passed' | 'failed'; detail: string; done: boolean }
+
+// DB에 저장된 UI 플로우 (사이트 URL별)
+export interface UiFlowRecord { id: number | null; name: string; site_url: string; actions_json: string }
+export interface UiFlowSite { site_url: string; count: number }

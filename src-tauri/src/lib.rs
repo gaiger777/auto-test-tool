@@ -31,6 +31,7 @@ pub fn run() {
                 db: Mutex::new(db),
                 active_runs: Mutex::new(Default::default()),
                 capture: Mutex::new(None),
+                replay: Mutex::new(None),
             });
             if let Some(main) = app.get_webview_window("main") {
                 // 캡처 창이 깨진 TLS(미신뢰 CA·호스트명 불일치·만료 등) 내부 서버도 로드하도록
@@ -73,7 +74,20 @@ pub fn run() {
             commands::start_capture_session,
             commands::stop_capture_session,
             commands::capture_session_active,
-            commands::capture_push
+            commands::capture_push,
+            commands::ui_record,
+            commands::start_ui_replay,
+            commands::ui_replay_step,
+            commands::save_ui_actions,
+            commands::load_ui_actions,
+            commands::save_ui_flow,
+            commands::list_ui_flow_sites,
+            commands::list_ui_flows,
+            commands::list_all_ui_flows,
+            commands::delete_ui_flow,
+            commands::export_ui_flows,
+            commands::import_ui_flows,
+            commands::stop_ui_replay
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

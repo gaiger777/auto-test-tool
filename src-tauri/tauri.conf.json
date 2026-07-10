@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "autotest-tool",
+  "productName": "Recap",
   "version": "0.1.0",
   "identifier": "com.contrabass.autotest",
   "build": {
@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "autotest-tool",
-        "width": 800,
-        "height": 600
+        "title": "Recap",
+        "width": 1100,
+        "height": 720
       }
     ],
     "security": {

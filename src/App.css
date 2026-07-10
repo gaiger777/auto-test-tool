@@ -147,3 +147,40 @@ table.history th { background: var(--vsc-bg-alt); color: var(--vsc-fg-muted); fo
 ::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: #4f4f4f; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ── API 호출 상세 모달 ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+}
+.modal-panel {
+  width: min(860px, 92vw); max-height: 82vh; display: flex; flex-direction: column;
+  background: var(--vsc-bg-alt); border: 1px solid var(--vsc-border-strong); border-radius: 6px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--vsc-border);
+}
+.modal-body { padding: 8px 14px 14px; overflow: auto; }
+.call-item { border-bottom: 1px solid var(--vsc-border); }
+.call-row {
+  display: flex; gap: 10px; align-items: center; width: 100%;
+  background: transparent; border: none; text-align: left; padding: 7px 4px; cursor: pointer; color: var(--vsc-fg);
+}
+.call-row:hover { background: var(--vsc-hover); }
+.call-row .method { font-weight: 700; min-width: 52px; }
+.call-row .status-ok { color: var(--vsc-ok); min-width: 34px; }
+.call-row .status-bad { color: var(--vsc-danger); min-width: 34px; }
+.call-row .url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vsc-fg-muted); }
+.call-detail { padding: 4px 8px 12px 24px; }
+.detail-label { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--vsc-fg-muted); }
+table.kv { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.kv td { border: 1px solid var(--vsc-border); padding: 4px 8px; vertical-align: top; }
+table.kv .kv-k { color: var(--vsc-accent); white-space: nowrap; width: 1%; }
+table.kv .kv-v { word-break: break-all; }
+.body-pre {
+  margin: 0; padding: 8px 10px; background: var(--vsc-bg-deep); border: 1px solid var(--vsc-border);
+  border-radius: 4px; font-size: 12px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+}
+.mono { font-family: ui-monospace, monospace; }
