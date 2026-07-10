@@ -27,10 +27,13 @@ pub struct UiSelector {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UiAction {
     pub id: String,
-    pub kind: String, // "click" | "input"
+    pub kind: String, // "click" | "input" | "hover"
     pub selectors: Vec<UiSelector>,
     pub name: String,
     pub value: Option<String>,
+    /// 링크 클릭이면 절대 URL. 재생 시 요소를 못 찾으면 이 URL로 폴백 이동.
+    #[serde(default)]
+    pub href: Option<String>,
     pub url: String,
     pub timestamp: i64,
 }

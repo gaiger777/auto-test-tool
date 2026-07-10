@@ -58,6 +58,7 @@ export interface UiAction {
   selectors: UiSelector[]
   name: string
   value: string | null
+  href?: string | null
   url: string
   timestamp: number
 }

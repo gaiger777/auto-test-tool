@@ -149,10 +149,12 @@ pub fn recorder_script(token: &str) -> String {
     out.push({{ strategy: "css", value: cssPath(el) }});
     return out;
   }}
+  function hrefOf(el) {{ try {{ var a = el.closest ? el.closest("a[href]") : null; return (a && a.href) ? a.href : null; }} catch (e) {{ return null; }} }}
   function record(kind, el, value) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
     send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
-            value: (value != null ? String(value) : null), url: location.href, timestamp: Date.now() }});
+            value: (value != null ? String(value) : null), href: (kind === "click" ? hrefOf(el) : null),
+            url: location.href, timestamp: Date.now() }});
   }}
   // 클릭 캡처: click 이벤트가 정상이면 그걸 쓰고, hover 메뉴처럼 mousedown에서 이동/닫힘이
   // 일어나 click이 안 뜨는 경우를 위해 pointerdown 폴백(뒤이어 click이 오면 취소)을 둔다.
@@ -306,8 +308,17 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   async function runFrom(start){
     for(var i=start;i<ACTIONS.length;i++){
       var a=ACTIONS[i];
-      var el=await waitActionable(a.selectors, 8000);
-      if(!el){ report(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return; }
+      // 링크 클릭이면 요소가 (hover 메뉴 등으로) 안 나타날 수 있으니 짧게 기다렸다가 href로 폴백 이동.
+      var el=await waitActionable(a.selectors, (a.kind==="click" && a.href) ? 3500 : 8000);
+      if(!el){
+        if(a.kind==="click" && a.href){
+          report(i, "passed", "링크 이동(폴백): "+a.href);
+          sessionStorage.setItem("__replay_idx", String(i+1));
+          location.href = a.href; // 페이지 전환 → 새 페이지에서 init 스크립트가 이어서 재생
+          return;
+        }
+        report(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return;
+      }
       try{ await perform(a, el); report(i, "passed", (a.kind==="input"?"입력: ":"클릭: ")+(a.name||"")); }
       catch(e){ report(i, "failed", String(e)); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return; }
       sessionStorage.setItem("__replay_idx", String(i+1));
