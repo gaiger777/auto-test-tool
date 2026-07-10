@@ -239,13 +239,19 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   function report(index, status, detail, done){ inv("ui_replay_step", { token: TOKEN, result: { index: index, status: status, detail: (detail||""), done: !!done } }); }
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-  // 네트워크 in-flight 카운터
+  // 네트워크 in-flight 카운터 + 호출 로그(검증용): 각 동작 뒤 발생한 호출의 상태코드를 본다.
   var inflight = 0;
+  window.__net = window.__net || [];
+  function logCall(m, u, s, t){ try{ window.__net.push({ method:(m||"GET").toUpperCase(), url:String(u||""), status:(s|0), ts:t }); }catch(e){} }
   var of = window.fetch;
-  if (of) window.fetch = function(){ inflight++; var p = of.apply(this, arguments); Promise.resolve(p).then(function(){ inflight=Math.max(0,inflight-1); }, function(){ inflight=Math.max(0,inflight-1); }); return p; };
+  if (of) window.fetch = function(){ inflight++; var args=arguments; var m=(args[1]&&args[1].method)||"GET"; var u=(args[0]&&args[0].url)||args[0]; var t=Date.now();
+    var p = of.apply(this, arguments); Promise.resolve(p).then(function(r){ inflight=Math.max(0,inflight-1); logCall(m,u,(r&&r.status)||0,t); }, function(){ inflight=Math.max(0,inflight-1); logCall(m,u,0,t); }); return p; };
+  var xoo = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(m, u){ this.__m=m; this.__u=u; return xoo.apply(this, arguments); };
   var xs = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.send = function(){ inflight++; this.addEventListener("loadend", function(){ inflight=Math.max(0,inflight-1); }); return xs.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function(){ inflight++; var self=this; var t=Date.now(); this.addEventListener("loadend", function(){ inflight=Math.max(0,inflight-1); logCall(self.__m, self.__u, self.status, t); }); return xs.apply(this, arguments); };
   async function waitNetworkIdle(maxMs){ var t=0; while(t<maxMs){ if(inflight<=0){ await sleep(400); if(inflight<=0) return; } await sleep(120); t+=120; } }
+  function shortPath(u){ try{ return new URL(u).pathname; }catch(e){ return u; } }
 
   function vtext(el){ return (el.textContent||"").trim().replace(/\s+/g," "); }
   function roleOf(el){ var r=el.getAttribute("role"); if(r) return r; var t=el.tagName.toLowerCase();
@@ -306,8 +312,11 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     else { el.click(); }
   }
   async function runFrom(start){
+    // href 폴백 네비게이션을 넘어서도 실패 누적이 유지되도록 sessionStorage에 보관.
+    var anyFail = sessionStorage.getItem("__replay_fail")==="1";
     for(var i=start;i<ACTIONS.length;i++){
       var a=ACTIONS[i];
+      var netStart=Date.now();
       // 링크 클릭이면 요소가 (hover 메뉴 등으로) 안 나타날 수 있으니 짧게 기다렸다가 href로 폴백 이동.
       var el=await waitActionable(a.selectors, (a.kind==="click" && a.href) ? 3500 : 8000);
       if(!el){
@@ -319,16 +328,27 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         }
         report(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return;
       }
-      try{ await perform(a, el); report(i, "passed", (a.kind==="input"?"입력: ":"클릭: ")+(a.name||"")); }
+      try{ await perform(a, el); }
       catch(e){ report(i, "failed", String(e)); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return; }
       sessionStorage.setItem("__replay_idx", String(i+1));
       await waitNetworkIdle(6000);
       await sleep(300);
+      // API 검증: 이 동작 이후 발생한 호출 중 4xx/5xx가 있으면 스텝 실패 표시(재생은 계속).
+      var base=(a.kind==="input"?"입력: ":a.kind==="hover"?"호버: ":"클릭: ")+(a.name||"");
+      var calls=(window.__net||[]).filter(function(c){ return c.ts>=netStart; });
+      var errs=calls.filter(function(c){ return c.status>=400; });
+      if(errs.length){
+        anyFail=true; sessionStorage.setItem("__replay_fail","1");
+        var d=errs.slice(0,3).map(function(c){ return c.method+" "+shortPath(c.url)+" → "+c.status; }).join(", ");
+        report(i, "failed", base+" · API오류 "+errs.length+"건: "+d);
+      } else {
+        report(i, "passed", base+" · API "+calls.length+"건");
+      }
     }
-    report(-1, "passed", "재생 완료", true);
+    report(-1, anyFail?"failed":"passed", anyFail?"완료(일부 API 오류)":"재생 완료", true);
   }
   function boot(){
-    if(sessionStorage.getItem("__replay_runid") !== TOKEN){ sessionStorage.setItem("__replay_runid", TOKEN); sessionStorage.setItem("__replay_idx", "0"); }
+    if(sessionStorage.getItem("__replay_runid") !== TOKEN){ sessionStorage.setItem("__replay_runid", TOKEN); sessionStorage.setItem("__replay_idx", "0"); sessionStorage.removeItem("__replay_fail"); }
     var idx = parseInt(sessionStorage.getItem("__replay_idx")||"0", 10);
     if(idx >= ACTIONS.length) return;
     setTimeout(function(){ runFrom(idx); }, 700);

@@ -52,6 +52,7 @@ export interface StepOutcome { index: number; name: string; status: StepStatus; 
 
 // UI 레코더: 캡처 창에서 사용자의 클릭/입력을 기록한 것
 export interface UiSelector { strategy: string; value: string }
+export interface UiCall { method: string; url: string; status: number }
 export interface UiAction {
   id: string
   kind: 'click' | 'input' | 'hover'
@@ -59,6 +60,7 @@ export interface UiAction {
   name: string
   value: string | null
   href?: string | null
+  api?: UiCall[]
   url: string
   timestamp: number
 }

@@ -42,7 +42,12 @@ export default function CaptureView() {
       setActive(false); setReplaying(false)
       setNotice('세션이 종료되었습니다. 목록은 유지됩니다.')
     })
-    return () => { unRec.then(u => u()); unUi.then(u => u()); unReplay.then(u => u()); unEnd.then(u => u()) }
+    const onFlows = () => reloadFlows() // 스위트 등 다른 화면에서 DB 변경 시 드롭다운 갱신
+    window.addEventListener('ui-flows-changed', onFlows)
+    return () => {
+      unRec.then(u => u()); unUi.then(u => u()); unReplay.then(u => u()); unEnd.then(u => u())
+      window.removeEventListener('ui-flows-changed', onFlows)
+    }
   }, [])
 
   const start = async () => {
@@ -127,8 +132,13 @@ export default function CaptureView() {
     if (!siteUrl) { setError('사이트 URL이 없습니다'); return }
     const dup = allFlows.find(f => f.site_url.replace(/\/+$/, '') === siteUrl && f.name === flowName.trim())
     if (dup && !window.confirm(`"${flowName.trim()}" 시나리오가 이미 있습니다. 덮어쓸까요?`)) return
+    // 각 동작이 유발한 네트워크 호출(상관 결과)을 함께 저장 → 스위트에서 API 표시.
+    const withApi: UiAction[] = uiActions.map(a => {
+      const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
+      return { ...a, api: linked.map(c => ({ method: c.method, url: c.url, status: c.status })) }
+    })
     try {
-      await api.saveUiFlow(flowName.trim(), siteUrl, uiActions)
+      await api.saveUiFlow(flowName.trim(), siteUrl, withApi)
       setNotice(`시나리오 "${flowName.trim()}" DB 저장됨 · 사이트 ${siteUrl}`)
       await reloadFlows()
       window.dispatchEvent(new CustomEvent('ui-flows-changed'))
@@ -227,7 +237,7 @@ export default function CaptureView() {
             <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>API</th><th>결과</th><th>관리</th></tr></thead>
             <tbody>
               {uiActions.map((a, i) => {
-                const linked = corr[a.id] || []
+                const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
                 return (
                 <Fragment key={a.id}>
                 <tr>
@@ -258,8 +268,8 @@ export default function CaptureView() {
                       <table className="history" style={{ margin: 0 }}>
                         <thead><tr><th>메서드</th><th>URL</th><th>상태</th></tr></thead>
                         <tbody>
-                          {linked.map(c => (
-                            <tr key={c.id}>
+                          {linked.map((c, ci) => (
+                            <tr key={ci}>
                               <td>{c.method}</td>
                               <td style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.url}>{c.url}</td>
                               <td>{c.status}</td>

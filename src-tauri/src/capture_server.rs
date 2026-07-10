@@ -22,6 +22,14 @@ pub struct UiSelector {
     pub value: String,
 }
 
+/// UI 동작이 유발한 네트워크 호출 요약(상관보기/검증 표시용).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UiCall {
+    pub method: String,
+    pub url: String,
+    pub status: u16,
+}
+
 /// 사용자가 캡처 창에서 한 UI 조작 하나 (클릭/입력).
 /// 레코더 스크립트가 `ui_record` 커맨드로 전달한다.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -34,6 +42,9 @@ pub struct UiAction {
     /// 링크 클릭이면 절대 URL. 재생 시 요소를 못 찾으면 이 URL로 폴백 이동.
     #[serde(default)]
     pub href: Option<String>,
+    /// 이 동작이 유발한 네트워크 호출(저장 시 상관 결과를 함께 보관 → 스위트에서 표시).
+    #[serde(default)]
+    pub api: Vec<UiCall>,
     pub url: String,
     pub timestamp: i64,
 }

@@ -89,8 +89,12 @@ export default function UiSuiteView() {
   const remove = async (i: number) => {
     const it = items[i]
     if (!window.confirm(`"${it.name}" 시나리오를 DB에서 삭제할까요?`)) return
-    try { await api.deleteUiFlow(it.id); setItems(list => list.filter((_, j) => j !== i)); loadSites() }
-    catch (e) { setError(String(e)) }
+    try {
+      await api.deleteUiFlow(it.id)
+      setItems(list => list.filter((_, j) => j !== i))
+      loadSites()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed')) // 캡처 화면 드롭다운도 갱신
+    } catch (e) { setError(String(e)) }
   }
   const toggleExpand = (i: number) => setItems(list => list.map((x, j) => (j === i ? { ...x, expanded: !x.expanded } : x)))
 
@@ -188,7 +192,7 @@ export default function UiSuiteView() {
                   <td></td>
                   <td colSpan={7} style={{ background: 'var(--vsc-bg-alt)' }}>
                     <table className="history" style={{ margin: 0 }}>
-                      <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th><th>삭제</th></tr></thead>
+                      <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>API</th><th>결과</th><th>삭제</th></tr></thead>
                       <tbody>
                         {it.actions.map((a, k) => (
                           <tr key={a.id + k}>
@@ -200,6 +204,7 @@ export default function UiSuiteView() {
                               {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
                             </td>
                             <td>{a.value ?? ''}</td>
+                            <td title={(a.api || []).map(c => `${c.method} ${c.url} → ${c.status}`).join('\n')}>{a.api?.length || 0}</td>
                             <td title={it.stepResults[k]?.detail || ''}>{stepIcon(it, k)}</td>
                             <td><button className="danger" onClick={() => delAction(i, k)} disabled={busy}>✕</button></td>
                           </tr>
