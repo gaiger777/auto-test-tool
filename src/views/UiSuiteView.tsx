@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
@@ -10,6 +10,8 @@ interface SuiteItem {
   actions: UiAction[]
   status: 'idle' | 'running' | 'passed' | 'failed'
   detail: string
+  expanded: boolean
+  stepResults: Record<number, { status: string; detail: string }>
 }
 
 const basename = (p: string) => p.split(/[\\/]/).pop() || p
@@ -36,7 +38,7 @@ export default function UiSuiteView() {
     const it = itemsRef.current[i]
     if (!it) return
     runningIdx.current = i
-    setItems(list => list.map((x, j) => (j === i ? { ...x, status: 'running', detail: '' } : x)))
+    setItems(list => list.map((x, j) => (j === i ? { ...x, status: 'running', detail: '', stepResults: {} } : x)))
     const url = it.actions[0]?.url
     if (!url) { finishItem(i, 'failed', '시작 URL이 없습니다 (첫 동작의 url 없음)'); return }
     try { await api.startUiReplay(url, it.actions) }
@@ -46,10 +48,12 @@ export default function UiSuiteView() {
   useEffect(() => {
     const un = listen<UiStepResult>('ui-replay-step', e => {
       const r = e.payload
-      if (!r.done) return
       const i = runningIdx.current
       if (i == null) return
-      finishItem(i, r.status, r.detail)
+      if (r.done) { finishItem(i, r.status, r.detail); return }
+      // 실행 중 파일의 스텝별 결과 기록
+      setItems(list => list.map((x, j) =>
+        j === i ? { ...x, stepResults: { ...x.stepResults, [r.index]: { status: r.status, detail: r.detail } } } : x))
     })
     return () => { un.then(u => u()) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -63,7 +67,7 @@ export default function UiSuiteView() {
     for (const p of list) {
       try {
         const acts = await api.loadUiActions(p)
-        loaded.push({ name: basename(p), path: p, actions: acts, status: 'idle', detail: '' })
+        loaded.push({ name: basename(p), path: p, actions: acts, status: 'idle', detail: '', expanded: false, stepResults: {} })
       } catch (e) { setError(`${basename(p)}: ${e}`) }
     }
     if (loaded.length) setItems(prev => [...prev, ...loaded])
@@ -80,11 +84,12 @@ export default function UiSuiteView() {
   }
   const remove = (i: number) => setItems(list => list.filter((_, j) => j !== i))
   const clearAll = () => { setItems([]); setError('') }
+  const toggleExpand = (i: number) => setItems(list => list.map((x, j) => (j === i ? { ...x, expanded: !x.expanded } : x)))
 
   const runAll = () => {
     if (!items.length || runningIdx.current != null) return
     setError('')
-    setItems(list => list.map(x => ({ ...x, status: 'idle', detail: '' })))
+    setItems(list => list.map(x => ({ ...x, status: 'idle', detail: '', stepResults: {} })))
     queue.current = items.map((_, i) => i)
     setRunningAll(true)
     const first = queue.current.shift()!
@@ -97,13 +102,17 @@ export default function UiSuiteView() {
   }
 
   const busy = runningIdx.current != null || runningAll
-  const icon = (s: SuiteItem['status']) =>
-    ({ idle: '—', running: '⏳', passed: '✅', failed: '❌' })[s]
+  const fileIcon = (s: SuiteItem['status']) => ({ idle: '—', running: '⏳', passed: '✅', failed: '❌' })[s]
+  const stepIcon = (it: SuiteItem, idx: number) => {
+    const r = it.stepResults[idx]
+    if (r) return r.status === 'passed' ? '✅' : '❌'
+    return it.status === 'running' ? '⏳' : ''
+  }
 
   return (
     <div>
       <h2>UI 테스트 스위트</h2>
-      <p className="dim">저장한 UI 동작(JSON)들을 불러와 순서대로 정렬하고, 개별 또는 전체 실행합니다.</p>
+      <p className="dim">저장한 UI 동작(JSON)들을 불러와 정렬하고, 개별/전체 실행합니다. 파일명을 눌러 펼치면 개별 동작이 보입니다.</p>
       <div className="add-row">
         <button onClick={loadFiles} disabled={busy}>불러오기 (여러 개)</button>
         <button onClick={sortByName} disabled={!items.length}>파일명순 정렬 {asc ? '↑' : '↓'}</button>
@@ -118,23 +127,51 @@ export default function UiSuiteView() {
 
       <table className="history">
         <thead>
-          <tr><th>#</th><th>파일명</th><th>동작수</th><th>상태</th><th>세부</th><th>실행</th><th>순서/삭제</th></tr>
+          <tr><th></th><th>#</th><th>파일명</th><th>동작수</th><th>상태</th><th>세부</th><th>실행</th><th>순서/삭제</th></tr>
         </thead>
         <tbody>
           {items.map((it, i) => (
-            <tr key={it.path + i}>
-              <td>{i + 1}</td>
-              <td title={it.path}>{it.name}</td>
-              <td>{it.actions.length}</td>
-              <td>{icon(it.status)}</td>
-              <td className="dim" title={it.detail} style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.detail}</td>
-              <td><button onClick={() => runOne(i)} disabled={busy}>개별 실행</button></td>
-              <td style={{ whiteSpace: 'nowrap' }}>
-                <button onClick={() => move(i, -1)} disabled={i === 0 || busy}>↑</button>
-                <button onClick={() => move(i, 1)} disabled={i === items.length - 1 || busy}>↓</button>
-                <button className="danger" onClick={() => remove(i)} disabled={busy}>✕</button>
-              </td>
-            </tr>
+            <Fragment key={it.path + i}>
+              <tr>
+                <td><button onClick={() => toggleExpand(i)} title="펼치기">{it.expanded ? '▾' : '▸'}</button></td>
+                <td>{i + 1}</td>
+                <td title={it.path} style={{ cursor: 'pointer' }} onClick={() => toggleExpand(i)}>{it.name}</td>
+                <td>{it.actions.length}</td>
+                <td>{fileIcon(it.status)}</td>
+                <td className="dim" title={it.detail} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.detail}</td>
+                <td><button onClick={() => runOne(i)} disabled={busy}>개별 실행</button></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button onClick={() => move(i, -1)} disabled={i === 0 || busy}>↑</button>
+                  <button onClick={() => move(i, 1)} disabled={i === items.length - 1 || busy}>↓</button>
+                  <button className="danger" onClick={() => remove(i)} disabled={busy}>✕</button>
+                </td>
+              </tr>
+              {it.expanded && (
+                <tr key={it.path + i + '-exp'}>
+                  <td></td>
+                  <td colSpan={7} style={{ background: 'var(--vsc-bg-alt)' }}>
+                    <table className="history" style={{ margin: 0 }}>
+                      <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th></tr></thead>
+                      <tbody>
+                        {it.actions.map((a, k) => (
+                          <tr key={a.id + k}>
+                            <td>{k + 1}</td>
+                            <td>{a.kind === 'click' ? '클릭' : '입력'}</td>
+                            <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
+                            <td className="dim" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n')}>
+                              {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
+                            </td>
+                            <td>{a.value ?? ''}</td>
+                            <td title={it.stepResults[k]?.detail || ''}>{stepIcon(it, k)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>

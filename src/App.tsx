@@ -43,7 +43,9 @@ export default function App() {
             <CaptureView />
           </div>
           {tab === 'scenarios' && <ScenarioBuilder />}
-          {tab === 'suite' && <UiSuiteView />}
+          <div style={{ display: tab === 'suite' ? undefined : 'none' }}>
+            <UiSuiteView />
+          </div>
           {tab === 'envs' && <EnvironmentsView />}
           {tab === 'history' && <HistoryView />}
         </main>
