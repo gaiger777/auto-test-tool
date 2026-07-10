@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { capturesToSteps, type CapturedCall } from '../capture'
 import type { ScenarioRecord, UiAction, UiStepResult, UiFlowRecord } from '../types'
@@ -75,6 +76,19 @@ export default function CaptureView() {
     const j = i + d
     if (j < 0 || j >= uiActions.length) return
     setUiActions(a => { const n = [...a]; [n[i], n[j]] = [n[j], n[i]]; return n }); setReplayResults({})
+  }
+
+  const doImport = async () => {
+    setError(''); setNotice('')
+    const path = await open({ multiple: false, filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (typeof path === 'string') {
+      try {
+        const n = await api.importUiFlows(path)
+        await reloadFlows()
+        window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+        setNotice(`${n}개 플로우를 DB로 가져왔습니다. "저장된 시나리오 불러오기"에서 선택하세요.`)
+      } catch (e) { setError(String(e)) }
+    }
   }
 
   const loadFlow = (f: UiFlowRecord) => {
@@ -187,6 +201,7 @@ export default function CaptureView() {
               <option value="">저장된 시나리오 불러오기…</option>
               {allFlows.map(f => <option key={f.id} value={f.id!}>{f.site_url} — {f.name}</option>)}
             </select>
+            <button onClick={doImport} disabled={active || replaying}>DB 가져오기</button>
           </div>
           <table className="history">
             <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th><th>관리</th></tr></thead>

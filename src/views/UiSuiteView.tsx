@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { open, save } from '@tauri-apps/plugin-dialog'
+import { save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import type { UiAction, UiStepResult, UiFlowSite } from '../types'
 
@@ -131,14 +131,6 @@ export default function UiSuiteView() {
     const path = await save({ defaultPath: 'recap-ui-flows.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
     if (path) { try { await api.exportUiFlows(path); setInfo('DB의 UI 플로우를 파일로 내보냈습니다.') } catch (e) { setError(String(e)) } }
   }
-  const doImport = async () => {
-    setError(''); setInfo('')
-    const path = await open({ multiple: false, filters: [{ name: 'JSON', extensions: ['json'] }] })
-    if (typeof path === 'string') {
-      try { const n = await api.importUiFlows(path); await loadSites(); setInfo(`${n}개 플로우를 DB로 가져왔습니다.`) }
-      catch (e) { setError(String(e)) }
-    }
-  }
 
   const busy = runningIdx.current != null || runningAll
   const fileIcon = (s: SuiteItem['status']) => ({ idle: '—', running: '⏳', passed: '✅', failed: '❌' })[s]
@@ -155,7 +147,7 @@ export default function UiSuiteView() {
       <div className="add-row">
         <select value={selectedSite} onChange={e => setSelectedSite(e.target.value)} style={{ minWidth: 320 }}>
           <option value="">사이트 URL 선택</option>
-          {sites.map(s => <option key={s.site_url} value={s.site_url}>{s.site_url} ({s.count})</option>)}
+          {sites.map(s => <option key={s.site_url} value={s.site_url}>{s.site_url}</option>)}
         </select>
         <button onClick={loadSite} disabled={!selectedSite || busy}>불러오기</button>
         <button onClick={loadSites} disabled={busy}>사이트 새로고침</button>
@@ -165,7 +157,6 @@ export default function UiSuiteView() {
         {busy && <button className="danger" onClick={cancelRun}>취소</button>}
         <span style={{ flex: 1 }} />
         <button onClick={doExport} disabled={busy}>DB 내보내기</button>
-        <button onClick={doImport} disabled={busy}>DB 가져오기</button>
       </div>
 
       {error && <p className="error">{error}</p>}
