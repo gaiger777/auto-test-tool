@@ -524,7 +524,8 @@ pub fn import_ui_flows(state: State<AppState>, path: String) -> Result<usize, St
     let db = state.db.lock().unwrap();
     let now = now();
     for f in &flows {
-        db.save_ui_flow(&f.name, &f.site_url, &f.actions_json, &now)?;
+        let site = f.site_url.trim().trim_end_matches('/');
+        db.save_ui_flow(f.name.trim(), site, &f.actions_json, &now)?;
     }
     Ok(flows.len())
 }

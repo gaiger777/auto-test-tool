@@ -16,6 +16,7 @@ export default function CaptureView() {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [scenarioName, setScenarioName] = useState('')
   const [flowName, setFlowName] = useState('')
+  const [selectedFlowId, setSelectedFlowId] = useState('')
   const [allFlows, setAllFlows] = useState<UiFlowRecord[]>([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -93,6 +94,20 @@ export default function CaptureView() {
         setNotice(`${n}개 플로우를 DB로 가져왔습니다. "저장된 시나리오 불러오기"에서 선택하세요.`)
       } catch (e) { setError(String(e)) }
     }
+  }
+
+  const deleteSelectedFlow = async () => {
+    setError(''); setNotice('')
+    const f = allFlows.find(x => String(x.id) === selectedFlowId)
+    if (!f) return
+    if (!window.confirm(`"${f.name}" 시나리오를 DB에서 삭제할까요?`)) return
+    try {
+      await api.deleteUiFlow(f.id!)
+      setSelectedFlowId('')
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+      setNotice(`"${f.name}" 삭제됨`)
+    } catch (e) { setError(String(e)) }
   }
 
   const loadFlow = (f: UiFlowRecord) => {
@@ -200,11 +215,12 @@ export default function CaptureView() {
               disabled={uiActions.length === 0 || replaying}>전체 삭제</button>
           </h3>
           <div className="add-row">
-            <select value="" disabled={active || replaying}
-              onChange={e => { const f = allFlows.find(x => String(x.id) === e.target.value); if (f) loadFlow(f) }}>
+            <select value={selectedFlowId} disabled={active || replaying}
+              onChange={e => { setSelectedFlowId(e.target.value); const f = allFlows.find(x => String(x.id) === e.target.value); if (f) loadFlow(f) }}>
               <option value="">저장된 시나리오 불러오기…</option>
               {allFlows.map(f => <option key={f.id} value={f.id!}>{f.site_url} — {f.name}</option>)}
             </select>
+            <button className="danger" onClick={deleteSelectedFlow} disabled={!selectedFlowId || active || replaying}>삭제</button>
             <button onClick={doImport} disabled={active || replaying}>DB 가져오기</button>
           </div>
           <table className="history">
