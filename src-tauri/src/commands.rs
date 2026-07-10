@@ -472,6 +472,20 @@ pub fn ui_replay_step(
     Ok(())
 }
 
+/// 기록한 UI 동작 목록을 JSON 파일로 저장한다.
+#[tauri::command]
+pub fn save_ui_actions(path: String, actions: Vec<capture_server::UiAction>) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&actions).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("파일 쓰기 실패: {e}"))
+}
+
+/// JSON 파일에서 UI 동작 목록을 불러온다.
+#[tauri::command]
+pub fn load_ui_actions(path: String) -> Result<Vec<capture_server::UiAction>, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("파일 읽기 실패: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("UI 동작 JSON 파싱 실패: {e}"))
+}
+
 #[tauri::command]
 pub fn stop_capture_session(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     // 락을 먼저 놓고 창을 닫아 Destroyed 핸들러와의 재진입 데드락을 피한다

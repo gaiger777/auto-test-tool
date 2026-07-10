@@ -21,6 +21,8 @@
     "allow-start-capture-session",
     "allow-stop-capture-session",
     "allow-capture-session-active",
-    "allow-start-ui-replay"
+    "allow-start-ui-replay",
+    "allow-save-ui-actions",
+    "allow-load-ui-actions"
   ]
 }

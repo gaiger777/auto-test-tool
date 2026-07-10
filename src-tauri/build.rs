@@ -24,6 +24,8 @@ fn main() {
             "ui_record",
             "start_ui_replay",
             "ui_replay_step",
+            "save_ui_actions",
+            "load_ui_actions",
         ])),
     )
     .expect("failed to run tauri-build");

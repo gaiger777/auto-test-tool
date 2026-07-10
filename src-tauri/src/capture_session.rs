@@ -156,15 +156,30 @@ pub fn recorder_script(token: &str) -> String {
   }}
   document.addEventListener("click", function(e) {{
     var el = e.target;
-    var actionable = el.closest ? el.closest("a,button,[role=button],[onclick],input,select,label,summary,[tabindex]") : null;
+    // 실제 컨트롤만 타겟으로 (큰 래퍼[tabindex]/[onclick]는 제외해 오탐 방지)
+    var actionable = el.closest ? el.closest("a,button,[role=button],[role=link],[role=menuitem],[role=tab],input,select,label,summary") : null;
     record("click", actionable || el, null);
+  }}, true);
+  // 입력: input을 디바운스로 잡아 blur 없이도 최종 값을 기록. 같은 값 중복은 건너뜀.
+  // (비밀번호 값도 기록한다 — 로컬 테스트 재생을 위해. 저장 파일에 평문 포함되니 유의)
+  var __timers = new WeakMap(), __lastVal = new WeakMap();
+  function recInput(el) {{
+    var v = el.value;
+    if (__lastVal.get(el) === v) return;
+    __lastVal.set(el, v);
+    record("input", el, v);
+  }}
+  document.addEventListener("input", function(e) {{
+    var el = e.target;
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+    clearTimeout(__timers.get(el));
+    __timers.set(el, setTimeout(function() {{ recInput(el); }}, 600));
   }}, true);
   document.addEventListener("change", function(e) {{
     var el = e.target;
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT")) return;
-    var ty = (el.getAttribute("type") || "").toLowerCase();
-    var val = (ty === "password") ? "" : el.value; // 비밀번호 값은 기록하지 않음
-    record("input", el, val);
+    clearTimeout(__timers.get(el));
+    recInput(el);
   }}, true);
 }})();"##
     )

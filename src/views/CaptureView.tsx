@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { capturesToSteps, type CapturedCall } from '../capture'
 import type { ScenarioRecord, UiAction, UiStepResult } from '../types'
@@ -24,7 +25,7 @@ export default function CaptureView() {
       setCalls(prev => [e.payload, ...prev])
     })
     const unUi = listen<UiAction>('ui-recorded', e => {
-      setUiActions(prev => [...prev, e.payload]) // 순서대로(위=먼저)
+      setUiActions(prev => [...prev, e.payload])
     })
     const unReplay = listen<UiStepResult>('ui-replay-step', e => {
       const r = e.payload
@@ -71,6 +72,37 @@ export default function CaptureView() {
     const startUrl = uiActions[0]?.url || url
     try { await api.startUiReplay(startUrl, uiActions) }
     catch (e) { setReplaying(false); setError(String(e)) }
+  }
+
+  // UI 동작 편집: 삭제 / 순번 이동 (편집 시 재생 결과는 초기화 — 인덱스가 바뀌므로)
+  const delUi = (i: number) => { setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}) }
+  const moveUi = (i: number, d: -1 | 1) => {
+    const j = i + d
+    if (j < 0 || j >= uiActions.length) return
+    const next = [...uiActions]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setUiActions(next); setReplayResults({})
+  }
+
+  const saveUi = async () => {
+    setError(''); setNotice('')
+    if (uiActions.length === 0) { setError('저장할 UI 동작이 없습니다'); return }
+    const path = await save({ defaultPath: 'ui-flow.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (path) {
+      try { await api.saveUiActions(path, uiActions); setNotice('UI 동작을 저장했습니다.') }
+      catch (e) { setError(String(e)) }
+    }
+  }
+  const loadUi = async () => {
+    setError(''); setNotice('')
+    const path = await open({ multiple: false, filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (typeof path === 'string') {
+      try {
+        const acts = await api.loadUiActions(path)
+        setUiActions(acts); setReplayResults({})
+        setNotice(`UI 동작 ${acts.length}개를 불러왔습니다.`)
+      } catch (e) { setError(String(e)) }
+    }
   }
 
   const toggle = (id: string) => setSelected(s => ({ ...s, [id]: !s[id] }))
@@ -141,27 +173,34 @@ export default function CaptureView() {
         </div>
 
         <div>
-          <h3>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             UI 동작 ({uiActions.length})
-            <button className="accent" style={{ marginLeft: 10 }}
-              disabled={active || replaying || uiActions.length === 0} onClick={replay}>
+            <button className="accent" disabled={active || replaying || uiActions.length === 0} onClick={replay}>
               {replaying ? '재생 중…' : '▶ 재생'}
             </button>
+            <button onClick={saveUi} disabled={uiActions.length === 0}>저장</button>
+            <button onClick={loadUi} disabled={active || replaying}>불러오기</button>
           </h3>
-          <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. ▶ 재생으로 그대로 실행합니다.</p>
+          <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. ↑↓로 순서, ✕로 삭제.</p>
           <table className="history">
-            <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th></tr></thead>
+            <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th><th>관리</th></tr></thead>
             <tbody>
               {uiActions.map((a, i) => (
                 <tr key={a.id}>
                   <td>{i + 1}</td>
                   <td>{a.kind === 'click' ? '클릭' : '입력'}</td>
-                  <td>{a.name}</td>
-                  <td className="dim" title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n')}>
+                  <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
+                  <td className="dim" style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n')}>
                     {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
                   </td>
                   <td>{a.value ?? ''}</td>
                   <td title={replayResults[i]?.detail || ''}>{resultIcon(i)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button onClick={() => moveUi(i, -1)} disabled={i === 0} title="위로">↑</button>
+                    <button onClick={() => moveUi(i, 1)} disabled={i === uiActions.length - 1} title="아래로">↓</button>
+                    <button className="danger" onClick={() => delUi(i)} title="삭제">✕</button>
+                  </td>
                 </tr>
               ))}
             </tbody>

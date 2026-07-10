@@ -25,3 +25,6 @@ export const captureSessionActive = () => invoke<boolean>('capture_session_activ
 
 export const startUiReplay = (url: string, actions: UiAction[]) =>
   invoke<void>('start_ui_replay', { url, actions })
+export const saveUiActions = (path: string, actions: UiAction[]) =>
+  invoke<void>('save_ui_actions', { path, actions })
+export const loadUiActions = (path: string) => invoke<UiAction[]>('load_ui_actions', { path })
