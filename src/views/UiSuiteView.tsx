@@ -193,7 +193,7 @@ export default function UiSuiteView() {
                         {it.actions.map((a, k) => (
                           <tr key={a.id + k}>
                             <td>{k + 1}</td>
-                            <td>{a.kind === 'click' ? '클릭' : '입력'}</td>
+                            <td>{a.kind === 'click' ? '클릭' : a.kind === 'input' ? '입력' : '호버'}</td>
                             <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
                             <td className="dim" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                               title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n')}>

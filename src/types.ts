@@ -54,7 +54,7 @@ export interface StepOutcome { index: number; name: string; status: StepStatus; 
 export interface UiSelector { strategy: string; value: string }
 export interface UiAction {
   id: string
-  kind: 'click' | 'input'
+  kind: 'click' | 'input' | 'hover'
   selectors: UiSelector[]
   name: string
   value: string | null

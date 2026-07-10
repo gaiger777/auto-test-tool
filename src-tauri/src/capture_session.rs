@@ -189,6 +189,37 @@ pub fn recorder_script(token: &str) -> String {
     clearTimeout(__timers.get(el));
     recInput(el);
   }}, true);
+  // hover 메뉴 감지: 마우스 올린 직후 '클릭 가능한 항목이 있는' 메뉴가 나타나면 hover 스텝 기록.
+  // (재생 시 그 요소에 hover를 쏴서 메뉴를 연 뒤 다음 클릭이 성공하게 함)
+  var __lastOver = null, __lastHover = null;
+  document.addEventListener("mouseover", function(e) {{ __lastOver = {{ el: e.target, t: Date.now() }}; }}, true);
+  function recordHover(el) {{
+    if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
+    if (__lastHover && __lastHover.el === el && Date.now() - __lastHover.t < 1500) return;
+    __lastHover = {{ el: el, t: Date.now() }};
+    send({{ id: "u" + (++uiseq), kind: "hover", selectors: ladder(el), name: nameOf(el),
+            value: null, url: location.href, timestamp: Date.now() }});
+  }}
+  try {{
+    var __mo = new MutationObserver(function(muts) {{
+      if (!__lastOver || Date.now() - __lastOver.t > 900) return;
+      for (var i = 0; i < muts.length; i++) {{
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {{
+          var n = added[j];
+          if (!n || n.nodeType !== 1) continue;
+          var o = __lastOver.el;
+          if (o && (o === n || (n.contains && n.contains(o)) || (o.contains && o.contains(n)))) continue;
+          if (n.querySelector && n.querySelector("a,button,[role=menuitem],[role=link],[role=option]")) {{
+            var trig = o.closest ? (o.closest("[role],a,button,li") || o) : o;
+            recordHover(trig);
+            return;
+          }}
+        }}
+      }}
+    }});
+    __mo.observe(document.documentElement, {{ childList: true, subtree: true }});
+  }} catch (e) {{}}
 }})();"##
     )
 }
@@ -264,8 +295,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   async function perform(a, el){
     try{ el.scrollIntoView({block:"center"}); }catch(e){}
     await sleep(60);
-    if(a.kind==="input") setNativeValue(el, a.value!=null?a.value:"");
-    else el.click();
+    if(a.kind==="hover"){
+      ["pointerover","mouseover","mouseenter","pointermove","mousemove"].forEach(function(t){
+        try{ el.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true, view:window})); }catch(e){}
+      });
+      await sleep(450);
+    } else if(a.kind==="input"){ setNativeValue(el, a.value!=null?a.value:""); }
+    else { el.click(); }
   }
   async function runFrom(start){
     for(var i=start;i<ACTIONS.length;i++){
