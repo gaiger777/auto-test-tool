@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { capturesToSteps, correlateCalls, type CapturedCall } from '../capture'
+import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import type { ScenarioRecord, UiAction, UiStepResult, UiFlowRecord } from '../types'
 
 export default function CaptureView() {
@@ -20,7 +21,7 @@ export default function CaptureView() {
   const [allFlows, setAllFlows] = useState<UiFlowRecord[]>([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [openUi, setOpenUi] = useState<Record<string, boolean>>({})
+  const [modalCalls, setModalCalls] = useState<{ title: string; calls: CallLike[] } | null>(null)
   const startedAt = useRef(0)
 
   // 각 UI 동작이 유발한 네트워크 호출을 timestamp로 묶는다 (상관보기).
@@ -135,7 +136,14 @@ export default function CaptureView() {
     // 각 동작이 유발한 네트워크 호출(상관 결과)을 함께 저장 → 스위트에서 API 표시.
     const withApi: UiAction[] = uiActions.map(a => {
       const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
-      return { ...a, api: linked.map(c => ({ method: c.method, url: c.url, status: c.status })) }
+      return {
+        ...a,
+        api: linked.map(c => ({
+          method: c.method, url: c.url, status: c.status,
+          request_headers: (c as CapturedCall).request_headers ?? {},
+          request_body: (c as CapturedCall).request_body ?? null,
+        })),
+      }
     })
     try {
       await api.saveUiFlow(flowName.trim(), siteUrl, withApi)
@@ -239,8 +247,7 @@ export default function CaptureView() {
               {uiActions.map((a, i) => {
                 const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
                 return (
-                <Fragment key={a.id}>
-                <tr>
+                <tr key={a.id}>
                   <td>{i + 1}</td>
                   <td>{a.kind === 'click' ? '클릭' : a.kind === 'input' ? '입력' : '호버'}</td>
                   <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
@@ -250,8 +257,8 @@ export default function CaptureView() {
                   </td>
                   <td>{a.value ?? ''}</td>
                   <td>{linked.length > 0
-                    ? <button onClick={() => setOpenUi(s => ({ ...s, [a.id]: !s[a.id] }))} title="유발된 네트워크 호출 보기">
-                        {openUi[a.id] ? '▾' : '▸'} {linked.length}
+                    ? <button onClick={() => setModalCalls({ title: a.name || `동작 ${i + 1}`, calls: linked as CallLike[] })} title="유발된 네트워크 호출 보기 (누르면 상세)">
+                        ▸ {linked.length}
                       </button>
                     : <span className="dim">0</span>}</td>
                   <td title={replayResults[i]?.detail || ''}>{resultIcon(i)}</td>
@@ -261,31 +268,13 @@ export default function CaptureView() {
                     <button className="danger" onClick={() => delUi(i)}>✕</button>
                   </td>
                 </tr>
-                {openUi[a.id] && linked.length > 0 && (
-                  <tr>
-                    <td></td>
-                    <td colSpan={7} style={{ background: 'var(--vsc-bg-alt)' }}>
-                      <table className="history" style={{ margin: 0 }}>
-                        <thead><tr><th>메서드</th><th>URL</th><th>상태</th></tr></thead>
-                        <tbody>
-                          {linked.map((c, ci) => (
-                            <tr key={ci}>
-                              <td>{c.method}</td>
-                              <td style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.url}>{c.url}</td>
-                              <td>{c.status}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </td>
-                  </tr>
-                )}
-                </Fragment>
               )})}
             </tbody>
           </table>
         </div>
       </div>
+
+      {modalCalls && <ApiCallsModal title={modalCalls.title} calls={modalCalls.calls} onClose={() => setModalCalls(null)} />}
     </div>
   )
 }

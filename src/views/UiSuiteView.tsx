@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
+import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import type { UiAction, UiStepResult, UiFlowSite } from '../types'
 
 interface SuiteItem {
@@ -22,6 +23,7 @@ export default function UiSuiteView() {
   const [runningAll, setRunningAll] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
+  const [modalCalls, setModalCalls] = useState<{ title: string; calls: CallLike[] } | null>(null)
 
   const itemsRef = useRef<SuiteItem[]>([])
   useEffect(() => { itemsRef.current = items }, [items])
@@ -204,7 +206,9 @@ export default function UiSuiteView() {
                               {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
                             </td>
                             <td>{a.value ?? ''}</td>
-                            <td title={(a.api || []).map(c => `${c.method} ${c.url} → ${c.status}`).join('\n')}>{a.api?.length || 0}</td>
+                            <td>{(a.api?.length || 0) > 0
+                              ? <button onClick={() => setModalCalls({ title: a.name || `동작 ${k + 1}`, calls: a.api as CallLike[] })} title="유발된 네트워크 호출 보기 (누르면 상세)">▸ {a.api!.length}</button>
+                              : <span className="dim">0</span>}</td>
                             <td title={it.stepResults[k]?.detail || ''}>{stepIcon(it, k)}</td>
                             <td><button className="danger" onClick={() => delAction(i, k)} disabled={busy}>✕</button></td>
                           </tr>
@@ -218,6 +222,8 @@ export default function UiSuiteView() {
           ))}
         </tbody>
       </table>
+
+      {modalCalls && <ApiCallsModal title={modalCalls.title} calls={modalCalls.calls} onClose={() => setModalCalls(null)} />}
     </div>
   )
 }

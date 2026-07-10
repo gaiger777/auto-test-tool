@@ -22,12 +22,16 @@ pub struct UiSelector {
     pub value: String,
 }
 
-/// UI 동작이 유발한 네트워크 호출 요약(상관보기/검증 표시용).
+/// UI 동작이 유발한 네트워크 호출 요약(상관보기/검증/상세 표시용).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UiCall {
     pub method: String,
     pub url: String,
     pub status: u16,
+    #[serde(default)]
+    pub request_headers: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub request_body: Option<String>,
 }
 
 /// 사용자가 캡처 창에서 한 UI 조작 하나 (클릭/입력).
