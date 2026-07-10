@@ -23,6 +23,12 @@
     "allow-capture-session-active",
     "allow-start-ui-replay",
     "allow-save-ui-actions",
-    "allow-load-ui-actions"
+    "allow-load-ui-actions",
+    "allow-save-ui-flow",
+    "allow-list-ui-flow-sites",
+    "allow-list-ui-flows",
+    "allow-delete-ui-flow",
+    "allow-export-ui-flows",
+    "allow-import-ui-flows"
   ]
 }

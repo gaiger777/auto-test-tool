@@ -26,6 +26,12 @@ fn main() {
             "ui_replay_step",
             "save_ui_actions",
             "load_ui_actions",
+            "save_ui_flow",
+            "list_ui_flow_sites",
+            "list_ui_flows",
+            "delete_ui_flow",
+            "export_ui_flows",
+            "import_ui_flows",
         ])),
     )
     .expect("failed to run tauri-build");

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-ui-flow"
+description = "Enables the save_ui_flow command without any pre-configured scope."
+commands.allow = ["save_ui_flow"]
+
+[[permission]]
+identifier = "deny-save-ui-flow"
+description = "Denies the save_ui_flow command without any pre-configured scope."
+commands.deny = ["save_ui_flow"]

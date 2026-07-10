@@ -5,7 +5,9 @@ use crate::events::EventBus;
 use crate::keystone::{KeystoneAuth, KeystoneClient};
 use crate::models::{Scenario, StepDef, Vars};
 use crate::mq;
-use crate::store::{self, Environment, RunRecord, ScenarioRecord, StepResultRecord, Store};
+use crate::store::{
+    self, Environment, RunRecord, ScenarioRecord, StepResultRecord, Store, UiFlowRecord, UiFlowSite,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -451,6 +453,62 @@ pub fn save_ui_actions(path: String, actions: Vec<capture_server::UiAction>) -> 
 pub fn load_ui_actions(path: String) -> Result<Vec<capture_server::UiAction>, String> {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("파일 읽기 실패: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("UI 동작 JSON 파싱 실패: {e}"))
+}
+
+// --- UI 플로우 DB (사이트 URL별 시나리오 이름으로 관리) ---
+
+/// UI 동작 플로우를 DB에 저장(사이트 URL + 이름 기준 upsert).
+#[tauri::command]
+pub fn save_ui_flow(
+    state: State<AppState>,
+    name: String,
+    site_url: String,
+    actions: Vec<capture_server::UiAction>,
+) -> Result<i64, String> {
+    if name.trim().is_empty() {
+        return Err("시나리오 이름을 입력하세요".into());
+    }
+    let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
+    state.db.lock().unwrap().save_ui_flow(name.trim(), site_url.trim(), &json, &now())
+}
+
+/// 저장된 사이트 URL 목록(각 URL의 시나리오 개수).
+#[tauri::command]
+pub fn list_ui_flow_sites(state: State<AppState>) -> Result<Vec<UiFlowSite>, String> {
+    state.db.lock().unwrap().list_ui_flow_sites()
+}
+
+/// 특정 사이트 URL의 저장된 UI 플로우 목록.
+#[tauri::command]
+pub fn list_ui_flows(state: State<AppState>, site_url: String) -> Result<Vec<UiFlowRecord>, String> {
+    state.db.lock().unwrap().list_ui_flows(&site_url)
+}
+
+#[tauri::command]
+pub fn delete_ui_flow(state: State<AppState>, id: i64) -> Result<(), String> {
+    state.db.lock().unwrap().delete_ui_flow(id)
+}
+
+/// DB의 모든 UI 플로우를 JSON 파일로 내보낸다.
+#[tauri::command]
+pub fn export_ui_flows(state: State<AppState>, path: String) -> Result<(), String> {
+    let flows = state.db.lock().unwrap().all_ui_flows()?;
+    let json = serde_json::to_string_pretty(&flows).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("파일 쓰기 실패: {e}"))
+}
+
+/// JSON 파일의 UI 플로우들을 DB로 가져온다(사이트 URL+이름 기준 upsert). 가져온 개수 반환.
+#[tauri::command]
+pub fn import_ui_flows(state: State<AppState>, path: String) -> Result<usize, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("파일 읽기 실패: {e}"))?;
+    let flows: Vec<UiFlowRecord> =
+        serde_json::from_str(&text).map_err(|e| format!("UI 플로우 JSON 파싱 실패: {e}"))?;
+    let db = state.db.lock().unwrap();
+    let now = now();
+    for f in &flows {
+        db.save_ui_flow(&f.name, &f.site_url, &f.actions_json, &now)?;
+    }
+    Ok(flows.len())
 }
 
 #[tauri::command]

@@ -64,3 +64,7 @@ export interface UiAction {
 
 // UI 재생 스텝 결과 (index = -1 은 재생 종료 신호)
 export interface UiStepResult { index: number; status: 'passed' | 'failed'; detail: string; done: boolean }
+
+// DB에 저장된 UI 플로우 (사이트 URL별)
+export interface UiFlowRecord { id: number | null; name: string; site_url: string; actions_json: string }
+export interface UiFlowSite { site_url: string; count: number }

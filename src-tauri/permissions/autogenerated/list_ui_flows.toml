@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-ui-flows"
+description = "Enables the list_ui_flows command without any pre-configured scope."
+commands.allow = ["list_ui_flows"]
+
+[[permission]]
+identifier = "deny-list-ui-flows"
+description = "Denies the list_ui_flows command without any pre-configured scope."
+commands.deny = ["list_ui_flows"]

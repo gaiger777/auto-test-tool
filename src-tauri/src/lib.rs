@@ -79,7 +79,13 @@ pub fn run() {
             commands::start_ui_replay,
             commands::ui_replay_step,
             commands::save_ui_actions,
-            commands::load_ui_actions
+            commands::load_ui_actions,
+            commands::save_ui_flow,
+            commands::list_ui_flow_sites,
+            commands::list_ui_flows,
+            commands::delete_ui_flow,
+            commands::export_ui_flows,
+            commands::import_ui_flows
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

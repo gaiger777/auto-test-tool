@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { open, save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { capturesToSteps, type CapturedCall } from '../capture'
 import type { ScenarioRecord, UiAction, UiStepResult } from '../types'
@@ -15,6 +14,7 @@ export default function CaptureView() {
   const [replayResults, setReplayResults] = useState<Record<number, { status: string; detail: string }>>({})
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [scenarioName, setScenarioName] = useState('')
+  const [flowName, setFlowName] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startedAt = useRef(0)
@@ -84,25 +84,16 @@ export default function CaptureView() {
     setUiActions(next); setReplayResults({})
   }
 
-  const saveUi = async () => {
+  const saveFlow = async () => {
     setError(''); setNotice('')
     if (uiActions.length === 0) { setError('저장할 UI 동작이 없습니다'); return }
-    const path = await save({ defaultPath: 'ui-flow.json', filters: [{ name: 'JSON', extensions: ['json'] }] })
-    if (path) {
-      try { await api.saveUiActions(path, uiActions); setNotice('UI 동작을 저장했습니다.') }
-      catch (e) { setError(String(e)) }
-    }
-  }
-  const loadUi = async () => {
-    setError(''); setNotice('')
-    const path = await open({ multiple: false, filters: [{ name: 'JSON', extensions: ['json'] }] })
-    if (typeof path === 'string') {
-      try {
-        const acts = await api.loadUiActions(path)
-        setUiActions(acts); setReplayResults({})
-        setNotice(`UI 동작 ${acts.length}개를 불러왔습니다.`)
-      } catch (e) { setError(String(e)) }
-    }
+    if (!flowName.trim()) { setError('시나리오 이름을 입력하세요'); return }
+    const siteUrl = url || uiActions[0]?.url || ''
+    if (!siteUrl) { setError('사이트 URL이 없습니다'); return }
+    try {
+      await api.saveUiFlow(flowName.trim(), siteUrl, uiActions)
+      setNotice(`시나리오 "${flowName.trim()}" DB 저장됨 · 사이트 ${siteUrl}`)
+    } catch (e) { setError(String(e)) }
   }
 
   const toggle = (id: string) => setSelected(s => ({ ...s, [id]: !s[id] }))
@@ -180,8 +171,9 @@ export default function CaptureView() {
             <button className="accent" disabled={active || replaying || uiActions.length === 0} onClick={replay}>
               {replaying ? '재생 중…' : '▶ 재생'}
             </button>
-            <button onClick={saveUi} disabled={uiActions.length === 0}>저장</button>
-            <button onClick={loadUi} disabled={active || replaying}>불러오기</button>
+            <input placeholder="시나리오 이름" value={flowName} onChange={e => setFlowName(e.target.value)}
+              style={{ width: 150, fontSize: 12 }} />
+            <button onClick={saveFlow} disabled={uiActions.length === 0}>DB 저장</button>
             <button className="danger" onClick={() => { setUiActions([]); setReplayResults({}) }}
               disabled={uiActions.length === 0 || replaying}>전체 삭제</button>
           </h3>

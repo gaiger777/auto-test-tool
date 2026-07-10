@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-ui-flow"
+description = "Enables the delete_ui_flow command without any pre-configured scope."
+commands.allow = ["delete_ui_flow"]
+
+[[permission]]
+identifier = "deny-delete-ui-flow"
+description = "Denies the delete_ui_flow command without any pre-configured scope."
+commands.deny = ["delete_ui_flow"]
