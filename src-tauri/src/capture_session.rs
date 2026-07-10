@@ -344,7 +344,7 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       // API 검증: 이 동작 이후 발생한 호출 중 4xx/5xx가 있으면 스텝 실패 표시(재생은 계속).
       var base=(a.kind==="input"?"입력: ":a.kind==="hover"?"호버: ":"클릭: ")+(a.name||"");
       var calls=(window.__net||[]).filter(function(c){ return c.ts>=netStart; });
-      var errs=calls.filter(function(c){ return c.status>=400; });
+      var errs=calls.filter(function(c){ return c.status>=400 && c.status!==401; });
       if(errs.length){
         anyFail=true; sessionStorage.setItem("__replay_fail","1");
         var d=errs.slice(0,3).map(function(c){ return c.method+" "+shortPath(c.url)+" → "+c.status; }).join(", ");
