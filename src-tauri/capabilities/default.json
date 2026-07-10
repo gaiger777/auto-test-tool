@@ -27,8 +27,10 @@
     "allow-save-ui-flow",
     "allow-list-ui-flow-sites",
     "allow-list-ui-flows",
+    "allow-list-all-ui-flows",
     "allow-delete-ui-flow",
     "allow-export-ui-flows",
-    "allow-import-ui-flows"
+    "allow-import-ui-flows",
+    "allow-stop-ui-replay"
   ]
 }

@@ -31,7 +31,12 @@ export default function UiSuiteView() {
   const loadSites = async () => {
     try { setSites(await api.listUiFlowSites()) } catch (e) { setError(String(e)) }
   }
-  useEffect(() => { loadSites() }, [])
+  useEffect(() => {
+    loadSites()
+    const h = () => loadSites() // 캡처 탭에서 DB 저장 시 자동 갱신
+    window.addEventListener('ui-flows-changed', h)
+    return () => window.removeEventListener('ui-flows-changed', h)
+  }, [])
 
   const finishItem = (i: number, status: 'passed' | 'failed', detail: string) => {
     setItems(list => list.map((x, j) => (j === i ? { ...x, status, detail } : x)))
@@ -89,6 +94,24 @@ export default function UiSuiteView() {
   }
   const toggleExpand = (i: number) => setItems(list => list.map((x, j) => (j === i ? { ...x, expanded: !x.expanded } : x)))
 
+  // 스위트 내에서 동작별 개별 삭제 (DB에도 반영)
+  const delAction = async (i: number, k: number) => {
+    const it = itemsRef.current[i]
+    if (!it) return
+    const next = it.actions.filter((_, x) => x !== k)
+    setItems(list => list.map((y, j) => (j === i ? { ...y, actions: next, stepResults: {} } : y)))
+    try { await api.saveUiFlow(it.name, it.siteUrl, next) } catch (e) { setError(String(e)) }
+  }
+
+  const cancelRun = async () => {
+    queue.current = []
+    const i = runningIdx.current
+    runningIdx.current = null
+    setRunningAll(false)
+    try { await api.stopUiReplay() } catch { /* noop */ }
+    if (i != null) setItems(list => list.map((x, j) => (j === i ? { ...x, status: 'idle', detail: '취소됨' } : x)))
+  }
+
   const runAll = () => {
     if (!items.length || runningIdx.current != null) return
     setError('')
@@ -139,6 +162,7 @@ export default function UiSuiteView() {
         <button className="accent" onClick={runAll} disabled={!items.length || busy}>
           {runningAll ? '전체 실행 중…' : '▶ 전체 실행'}
         </button>
+        {busy && <button className="danger" onClick={cancelRun}>취소</button>}
         <span style={{ flex: 1 }} />
         <button onClick={doExport} disabled={busy}>DB 내보내기</button>
         <button onClick={doImport} disabled={busy}>DB 가져오기</button>
@@ -173,7 +197,7 @@ export default function UiSuiteView() {
                   <td></td>
                   <td colSpan={7} style={{ background: 'var(--vsc-bg-alt)' }}>
                     <table className="history" style={{ margin: 0 }}>
-                      <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th></tr></thead>
+                      <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th><th>삭제</th></tr></thead>
                       <tbody>
                         {it.actions.map((a, k) => (
                           <tr key={a.id + k}>
@@ -186,6 +210,7 @@ export default function UiSuiteView() {
                             </td>
                             <td>{a.value ?? ''}</td>
                             <td title={it.stepResults[k]?.detail || ''}>{stepIcon(it, k)}</td>
+                            <td><button className="danger" onClick={() => delAction(i, k)} disabled={busy}>✕</button></td>
                           </tr>
                         ))}
                       </tbody>

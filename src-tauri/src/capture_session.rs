@@ -154,11 +154,19 @@ pub fn recorder_script(token: &str) -> String {
     send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
             value: (value != null ? String(value) : null), url: location.href, timestamp: Date.now() }});
   }}
+  // 클릭 캡처: click 이벤트가 정상이면 그걸 쓰고, hover 메뉴처럼 mousedown에서 이동/닫힘이
+  // 일어나 click이 안 뜨는 경우를 위해 pointerdown 폴백(뒤이어 click이 오면 취소)을 둔다.
+  var CLICKSEL = "a,button,[role=button],[role=link],[role=menuitem],[role=tab],[role=option],input,select,label,summary";
+  function actionableOf(el) {{ return (el && el.closest) ? (el.closest(CLICKSEL) || el) : el; }}
+  var __pd = null;
+  document.addEventListener("pointerdown", function(e) {{
+    var t = actionableOf(e.target);
+    if (__pd) clearTimeout(__pd.timer);
+    __pd = {{ t: t, timer: setTimeout(function() {{ if (__pd && __pd.t === t) {{ record("click", t, null); __pd = null; }} }}, 350) }};
+  }}, true);
   document.addEventListener("click", function(e) {{
-    var el = e.target;
-    // 실제 컨트롤만 타겟으로 (큰 래퍼[tabindex]/[onclick]는 제외해 오탐 방지)
-    var actionable = el.closest ? el.closest("a,button,[role=button],[role=link],[role=menuitem],[role=tab],input,select,label,summary") : null;
-    record("click", actionable || el, null);
+    if (__pd) {{ clearTimeout(__pd.timer); __pd = null; }}
+    record("click", actionableOf(e.target), null);
   }}, true);
   // 입력: input을 디바운스로 잡아 blur 없이도 최종 값을 기록. 같은 값 중복은 건너뜀.
   // (비밀번호 값도 기록한다 — 로컬 테스트 재생을 위해. 저장 파일에 평문 포함되니 유의)

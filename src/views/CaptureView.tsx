@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import * as api from '../api'
 import { capturesToSteps, type CapturedCall } from '../capture'
-import type { ScenarioRecord, UiAction, UiStepResult } from '../types'
+import type { ScenarioRecord, UiAction, UiStepResult, UiFlowRecord } from '../types'
 
 export default function CaptureView() {
   const [url, setUrl] = useState('')
@@ -15,30 +15,25 @@ export default function CaptureView() {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [scenarioName, setScenarioName] = useState('')
   const [flowName, setFlowName] = useState('')
+  const [allFlows, setAllFlows] = useState<UiFlowRecord[]>([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startedAt = useRef(0)
 
+  const reloadFlows = () => api.listAllUiFlows().then(setAllFlows).catch(() => {})
+
   useEffect(() => {
     api.captureSessionActive().then(setActive).catch(() => {})
-    const unRec = listen<CapturedCall>('capture-recorded', e => {
-      setCalls(prev => [e.payload, ...prev])
-    })
-    const unUi = listen<UiAction>('ui-recorded', e => {
-      setUiActions(prev => [...prev, e.payload])
-    })
+    reloadFlows()
+    const unRec = listen<CapturedCall>('capture-recorded', e => setCalls(prev => [e.payload, ...prev]))
+    const unUi = listen<UiAction>('ui-recorded', e => setUiActions(prev => [...prev, e.payload]))
     const unReplay = listen<UiStepResult>('ui-replay-step', e => {
       const r = e.payload
-      if (r.done) {
-        setReplaying(false)
-        setNotice(r.status === 'passed' ? 'UI 재생 완료' : `UI 재생 중단: ${r.detail}`)
-      } else {
-        setReplayResults(prev => ({ ...prev, [r.index]: { status: r.status, detail: r.detail } }))
-      }
+      if (r.done) { setReplaying(false); setNotice(r.status === 'passed' ? 'UI 재생 완료' : `UI 재생 중단: ${r.detail}`) }
+      else setReplayResults(prev => ({ ...prev, [r.index]: { status: r.status, detail: r.detail } }))
     })
     const unEnd = listen('capture-session-ended', () => {
-      setActive(false)
-      setReplaying(false)
+      setActive(false); setReplaying(false)
       setNotice('세션이 종료되었습니다. 목록은 유지됩니다.')
     })
     return () => { unRec.then(u => u()); unUi.then(u => u()); unReplay.then(u => u()); unEnd.then(u => u()) }
@@ -73,26 +68,37 @@ export default function CaptureView() {
     try { await api.startUiReplay(startUrl, uiActions) }
     catch (e) { setReplaying(false); setError(String(e)) }
   }
+  const cancelReplay = async () => { try { await api.stopUiReplay() } catch { /* noop */ } setReplaying(false) }
 
-  // UI 동작 편집: 삭제 / 순번 이동 (편집 시 재생 결과는 초기화 — 인덱스가 바뀌므로)
   const delUi = (i: number) => { setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}) }
   const moveUi = (i: number, d: -1 | 1) => {
     const j = i + d
     if (j < 0 || j >= uiActions.length) return
-    const next = [...uiActions]
-    ;[next[i], next[j]] = [next[j], next[i]]
-    setUiActions(next); setReplayResults({})
+    setUiActions(a => { const n = [...a]; [n[i], n[j]] = [n[j], n[i]]; return n }); setReplayResults({})
+  }
+
+  const loadFlow = (f: UiFlowRecord) => {
+    setError(''); setNotice('')
+    try {
+      setUiActions(JSON.parse(f.actions_json) as UiAction[])
+      setFlowName(f.name); setUrl(f.site_url); setReplayResults({})
+      setNotice(`"${f.name}" 불러옴 — 수정 후 DB 저장하면 덮어씁니다.`)
+    } catch (e) { setError(String(e)) }
   }
 
   const saveFlow = async () => {
     setError(''); setNotice('')
     if (uiActions.length === 0) { setError('저장할 UI 동작이 없습니다'); return }
     if (!flowName.trim()) { setError('시나리오 이름을 입력하세요'); return }
-    const siteUrl = url || uiActions[0]?.url || ''
+    const siteUrl = (url || uiActions[0]?.url || '').replace(/\/+$/, '')
     if (!siteUrl) { setError('사이트 URL이 없습니다'); return }
+    const dup = allFlows.find(f => f.site_url.replace(/\/+$/, '') === siteUrl && f.name === flowName.trim())
+    if (dup && !window.confirm(`"${flowName.trim()}" 시나리오가 이미 있습니다. 덮어쓸까요?`)) return
     try {
       await api.saveUiFlow(flowName.trim(), siteUrl, uiActions)
       setNotice(`시나리오 "${flowName.trim()}" DB 저장됨 · 사이트 ${siteUrl}`)
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
     } catch (e) { setError(String(e)) }
   }
 
@@ -128,8 +134,7 @@ export default function CaptureView() {
       <div className="add-row">
         <input placeholder="대상 사이트 URL (https://...)" value={url}
           onChange={e => setUrl(e.target.value)} disabled={active || replaying} style={{ minWidth: 320 }} />
-        <input placeholder="토큰 헤더명" value={tokenHeader}
-          onChange={e => setTokenHeader(e.target.value)} />
+        <input placeholder="토큰 헤더명" value={tokenHeader} onChange={e => setTokenHeader(e.target.value)} />
         {!active
           ? <button className="accent" onClick={start} disabled={replaying}>세션 시작</button>
           : <button className="danger" onClick={stop}>세션 종료</button>}
@@ -156,9 +161,7 @@ export default function CaptureView() {
               {calls.map(c => (
                 <tr key={c.id}>
                   <td><input type="checkbox" checked={!!selected[c.id]} onChange={() => toggle(c.id)} /></td>
-                  <td>{c.method}</td>
-                  <td>{c.url}</td>
-                  <td>{c.status}</td>
+                  <td>{c.method}</td><td>{c.url}</td><td>{c.status}</td>
                 </tr>
               ))}
             </tbody>
@@ -171,13 +174,20 @@ export default function CaptureView() {
             <button className="accent" disabled={active || replaying || uiActions.length === 0} onClick={replay}>
               {replaying ? '재생 중…' : '▶ 재생'}
             </button>
+            {replaying && <button className="danger" onClick={cancelReplay}>취소</button>}
             <input placeholder="시나리오 이름" value={flowName} onChange={e => setFlowName(e.target.value)}
               style={{ width: 150, fontSize: 12 }} />
             <button onClick={saveFlow} disabled={uiActions.length === 0}>DB 저장</button>
             <button className="danger" onClick={() => { setUiActions([]); setReplayResults({}) }}
               disabled={uiActions.length === 0 || replaying}>전체 삭제</button>
           </h3>
-          <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. ↑↓로 순서, ✕로 삭제.</p>
+          <div className="add-row">
+            <select value="" disabled={active || replaying}
+              onChange={e => { const f = allFlows.find(x => String(x.id) === e.target.value); if (f) loadFlow(f) }}>
+              <option value="">저장된 시나리오 불러오기…</option>
+              {allFlows.map(f => <option key={f.id} value={f.id!}>{f.site_url} — {f.name}</option>)}
+            </select>
+          </div>
           <table className="history">
             <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>결과</th><th>관리</th></tr></thead>
             <tbody>
@@ -193,9 +203,9 @@ export default function CaptureView() {
                   <td>{a.value ?? ''}</td>
                   <td title={replayResults[i]?.detail || ''}>{resultIcon(i)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button onClick={() => moveUi(i, -1)} disabled={i === 0} title="위로">↑</button>
-                    <button onClick={() => moveUi(i, 1)} disabled={i === uiActions.length - 1} title="아래로">↓</button>
-                    <button className="danger" onClick={() => delUi(i)} title="삭제">✕</button>
+                    <button onClick={() => moveUi(i, -1)} disabled={i === 0}>↑</button>
+                    <button onClick={() => moveUi(i, 1)} disabled={i === uiActions.length - 1}>↓</button>
+                    <button className="danger" onClick={() => delUi(i)}>✕</button>
                   </td>
                 </tr>
               ))}

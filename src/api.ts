@@ -34,6 +34,8 @@ export const saveUiFlow = (name: string, siteUrl: string, actions: UiAction[]) =
   invoke<number>('save_ui_flow', { name, siteUrl, actions })
 export const listUiFlowSites = () => invoke<UiFlowSite[]>('list_ui_flow_sites')
 export const listUiFlows = (siteUrl: string) => invoke<UiFlowRecord[]>('list_ui_flows', { siteUrl })
+export const listAllUiFlows = () => invoke<UiFlowRecord[]>('list_all_ui_flows')
 export const deleteUiFlow = (id: number) => invoke<void>('delete_ui_flow', { id })
+export const stopUiReplay = () => invoke<void>('stop_ui_replay')
 export const exportUiFlows = (path: string) => invoke<void>('export_ui_flows', { path })
 export const importUiFlows = (path: string) => invoke<number>('import_ui_flows', { path })

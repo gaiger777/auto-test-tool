@@ -441,6 +441,16 @@ pub fn ui_replay_step(
     Ok(())
 }
 
+/// 진행 중인 UI 재생을 취소한다(재생 창을 닫고 세션 해제).
+#[tauri::command]
+pub fn stop_ui_replay(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    *state.replay.lock().unwrap() = None;
+    if let Some(win) = app.get_webview_window("replay") {
+        let _ = win.close();
+    }
+    Ok(())
+}
+
 /// 기록한 UI 동작 목록을 JSON 파일로 저장한다.
 #[tauri::command]
 pub fn save_ui_actions(path: String, actions: Vec<capture_server::UiAction>) -> Result<(), String> {
@@ -468,8 +478,16 @@ pub fn save_ui_flow(
     if name.trim().is_empty() {
         return Err("시나리오 이름을 입력하세요".into());
     }
+    // URL 정규화: 끝의 / 제거 → 같은 사이트가 여러 항목으로 갈라지지 않게
+    let site = site_url.trim().trim_end_matches('/');
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
-    state.db.lock().unwrap().save_ui_flow(name.trim(), site_url.trim(), &json, &now())
+    state.db.lock().unwrap().save_ui_flow(name.trim(), site, &json, &now())
+}
+
+/// DB의 모든 UI 플로우(편집용 불러오기 목록).
+#[tauri::command]
+pub fn list_all_ui_flows(state: State<AppState>) -> Result<Vec<UiFlowRecord>, String> {
+    state.db.lock().unwrap().all_ui_flows()
 }
 
 /// 저장된 사이트 URL 목록(각 URL의 시나리오 개수).
