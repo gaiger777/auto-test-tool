@@ -317,8 +317,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     for(var i=start;i<ACTIONS.length;i++){
       var a=ACTIONS[i];
       var netStart=Date.now();
-      // 링크 클릭이면 요소가 (hover 메뉴 등으로) 안 나타날 수 있으니 짧게 기다렸다가 href로 폴백 이동.
-      var el=await waitActionable(a.selectors, (a.kind==="click" && a.href) ? 3500 : 8000);
+      // 대기: 링크 클릭은 짧게(href 폴백), 호버는 짧게(실패해도 건너뜀), 그 외 넉넉히.
+      var waitMs = a.kind==="hover" ? 3000 : ((a.kind==="click" && a.href) ? 3500 : 8000);
+      var el=await waitActionable(a.selectors, waitMs);
       if(!el){
         if(a.kind==="click" && a.href){
           report(i, "passed", "링크 이동(폴백): "+a.href);
@@ -326,10 +327,17 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
           location.href = a.href; // 페이지 전환 → 새 페이지에서 init 스크립트가 이어서 재생
           return;
         }
+        if(a.kind==="hover"){ // 호버는 보조 단계 → 실패해도 다음 스텝 진행
+          report(i, "passed", "호버 건너뜀(대상 미발견)");
+          sessionStorage.setItem("__replay_idx", String(i+1)); continue;
+        }
         report(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return;
       }
       try{ await perform(a, el); }
-      catch(e){ report(i, "failed", String(e)); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return; }
+      catch(e){
+        if(a.kind==="hover"){ report(i, "passed", "호버 건너뜀: "+String(e)); sessionStorage.setItem("__replay_idx", String(i+1)); continue; }
+        report(i, "failed", String(e)); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); report(-1, "failed", "중단됨", true); return;
+      }
       sessionStorage.setItem("__replay_idx", String(i+1));
       await waitNetworkIdle(6000);
       await sleep(300);
