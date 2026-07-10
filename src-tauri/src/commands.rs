@@ -15,6 +15,8 @@ pub struct AppState {
     pub db: Mutex<Store>,
     pub active_runs: Mutex<HashMap<i64, CancellationToken>>,
     pub capture: Mutex<Option<CaptureHandle>>,
+    /// 현재 UI 재생 세션 토큰 (캡처와 독립 — 스위트 연속 실행 시 교체 가능).
+    pub replay: Mutex<Option<String>>,
 }
 
 pub struct CaptureHandle {
@@ -402,55 +404,23 @@ pub fn start_ui_replay(
     if actions.is_empty() {
         return Err("재생할 UI 동작이 없습니다".into());
     }
+    // 재생 세션 토큰 설정(이전 재생을 교체 — 스위트 연속/개별 실행 지원). 캡처와 독립.
     let token = generate_capture_token();
-    {
-        let mut guard = state.capture.lock().unwrap();
-        if guard.is_some() {
-            return Err("이미 진행 중인 세션이 있습니다 (캡처/재생)".into());
-        }
-        *guard = Some(CaptureHandle {
-            id: token.clone(),
-            cancel: CancellationToken::new(),
-            seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        });
-    }
+    *state.replay.lock().unwrap() = Some(token.clone());
     if let Some(win) = app.get_webview_window("replay") {
         let _ = win.close();
     }
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
     let script = capture_session::player_script(&token, &json);
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
-    let window = match tauri::WebviewWindowBuilder::new(
-        &app,
-        "replay",
-        tauri::WebviewUrl::External(parsed),
-    )
-    .title("UI 재생")
-    .initialization_script(&script)
-    .build()
-    {
-        Ok(w) => w,
-        Err(e) => {
-            let mut guard = state.capture.lock().unwrap();
-            if guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
-                guard.take();
-            }
-            return Err(format!("재생 창 생성 실패: {e}"));
-        }
-    };
-    let app_close = app.clone();
-    let my_id = token.clone();
-    window.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
-            let st = app_close.state::<AppState>();
-            let mut guard = st.capture.lock().unwrap();
-            if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
-                guard.take();
-                drop(guard);
-                let _ = app_close.emit("capture-session-ended", ());
-            }
-        }
-    });
+    tauri::WebviewWindowBuilder::new(&app, "replay", tauri::WebviewUrl::External(parsed))
+        .title("UI 재생")
+        .initialization_script(&script)
+        .build()
+        .map_err(|e| {
+            *state.replay.lock().unwrap() = None;
+            format!("재생 창 생성 실패: {e}")
+        })?;
     Ok(())
 }
 
@@ -462,11 +432,8 @@ pub fn ui_replay_step(
     token: String,
     result: capture_server::UiStepResult,
 ) -> Result<(), String> {
-    {
-        let guard = state.capture.lock().unwrap();
-        if !guard.as_ref().map(|h| h.id == token).unwrap_or(false) {
-            return Err("활성 세션 아님".into());
-        }
+    if state.replay.lock().unwrap().as_deref() != Some(token.as_str()) {
+        return Err("활성 재생 세션이 아닙니다".into());
     }
     let _ = app.emit("ui-replay-step", result);
     Ok(())

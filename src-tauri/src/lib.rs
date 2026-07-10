@@ -31,6 +31,7 @@ pub fn run() {
                 db: Mutex::new(db),
                 active_runs: Mutex::new(Default::default()),
                 capture: Mutex::new(None),
+                replay: Mutex::new(None),
             });
             if let Some(main) = app.get_webview_window("main") {
                 // 캡처 창이 깨진 TLS(미신뢰 CA·호스트명 불일치·만료 등) 내부 서버도 로드하도록

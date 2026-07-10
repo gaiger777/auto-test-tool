@@ -156,7 +156,9 @@ export default function CaptureView() {
 
       <div className="two-col" style={{ gridTemplateColumns: '1fr 1fr' }}>
         <div>
-          <h3>네트워크 호출 ({calls.length})</h3>
+          <h3>네트워크 호출 ({calls.length})
+            <button style={{ marginLeft: 8 }} onClick={() => { setCalls([]); setSelected({}) }} disabled={calls.length === 0}>전체 삭제</button>
+          </h3>
           <table className="history">
             <thead><tr><th></th><th>메서드</th><th>URL</th><th>상태</th></tr></thead>
             <tbody>
@@ -180,6 +182,8 @@ export default function CaptureView() {
             </button>
             <button onClick={saveUi} disabled={uiActions.length === 0}>저장</button>
             <button onClick={loadUi} disabled={active || replaying}>불러오기</button>
+            <button className="danger" onClick={() => { setUiActions([]); setReplayResults({}) }}
+              disabled={uiActions.length === 0 || replaying}>전체 삭제</button>
           </h3>
           <p className="dim" style={{ marginTop: 0 }}>캡처 창에서 클릭·입력하면 기록됩니다. ↑↓로 순서, ✕로 삭제.</p>
           <table className="history">
