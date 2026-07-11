@@ -144,6 +144,25 @@ export default function CaptureView() {
     } catch (e) { setError(String(e)) }
   }
 
+  const renameFlow = async (f: UiFlowRecord, newName: string) => {
+    setError('')
+    try {
+      await api.renameUiFlow(f.id!, newName)
+      if (loadedFlowId === f.id) setFlowName(newName)
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+    } catch (e) { setError(String(e)) }
+  }
+  const renameGroup = async (site: string, oldGroup: string, newGroup: string) => {
+    setError('')
+    try {
+      await api.renameUiGroup(site, oldGroup, newGroup)
+      if (loadedFlowId != null && (group || '') === oldGroup) setGroup(newGroup)
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+    } catch (e) { setError(String(e)) }
+  }
+
   const loadFlow = (f: UiFlowRecord) => {
     setError(''); setNotice('')
     try {
@@ -197,7 +216,8 @@ export default function CaptureView() {
             <strong style={{ fontSize: 13 }}>시나리오</strong>
             <button onClick={newScenario}>+ 새 시나리오</button>
           </div>
-          <FlowTree flows={allFlows} selectedId={loadedFlowId} onPickFlow={loadFlow} />
+          <FlowTree flows={allFlows} selectedId={loadedFlowId} onPickFlow={loadFlow}
+            onRenameFlow={renameFlow} onRenameGroup={renameGroup} />
           <div className="add-row" style={{ marginTop: 8 }}>
             <button onClick={doImport} disabled={active || replaying}>DB 가져오기</button>
           </div>

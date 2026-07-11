@@ -35,6 +35,46 @@ fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// URI 구성요소 percent-encoding (RFC3986 unreserved만 그대로 둠).
+fn pct(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// 환경의 RabbitMQ 클러스터 접속 URI 목록을 만든다. mq_hosts(쉼표 host:port)+계정으로 구성하고,
+/// 없으면 레거시 mq_url 단일값을 쓴다. 접속 시 순서대로 시도(페일오버).
+fn build_mq_uris(env: &Environment) -> Vec<String> {
+    let hosts: Vec<&str> = env
+        .mq_hosts
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if hosts.is_empty() {
+        let u = env.mq_url.trim();
+        return if u.is_empty() { vec![] } else { vec![u.to_string()] };
+    }
+    let vhost = if env.mq_vhost.trim().is_empty() { "/" } else { env.mq_vhost.trim() };
+    hosts
+        .iter()
+        .map(|h| {
+            format!(
+                "amqp://{}:{}@{}/{}",
+                pct(env.mq_user.trim()),
+                pct(&env.mq_password),
+                h,
+                pct(vhost)
+            )
+        })
+        .collect()
+}
+
 // --- 환경 ---
 
 #[tauri::command]
@@ -207,7 +247,8 @@ pub async fn run_scenario(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone(), None).await?;
+        let uris = build_mq_uris(&env);
+        mq::start_consumer(&uris, &exchanges, bus.clone(), cancel.clone(), None).await?;
         // base_url 변수
         for (svc, url) in &env.endpoints {
             run_vars.insert(format!("base_url.{svc}"), url.trim_end_matches('/').to_string());
@@ -494,7 +535,8 @@ pub async fn start_replay_mq(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone(), Some(app)).await?;
+    let uris = build_mq_uris(&env);
+    mq::start_consumer(&uris, &exchanges, bus.clone(), cancel.clone(), Some(app)).await?;
     *state.replay_bus.lock().unwrap() = Some((bus, cancel));
     Ok(())
 }
@@ -653,6 +695,31 @@ pub fn list_ui_flows(state: State<AppState>, site_url: String) -> Result<Vec<UiF
 #[tauri::command]
 pub fn delete_ui_flow(state: State<AppState>, id: i64) -> Result<(), String> {
     state.db.lock().unwrap().delete_ui_flow(id)
+}
+
+/// 시나리오 이름 변경.
+#[tauri::command]
+pub fn rename_ui_flow(state: State<AppState>, id: i64, new_name: String) -> Result<(), String> {
+    if new_name.trim().is_empty() {
+        return Err("이름을 입력하세요".into());
+    }
+    state.db.lock().unwrap().rename_ui_flow(id, new_name.trim())
+}
+
+/// 그룹명 일괄 변경(사이트 단위).
+#[tauri::command]
+pub fn rename_ui_group(
+    state: State<AppState>,
+    site_url: String,
+    old_group: String,
+    new_group: String,
+) -> Result<usize, String> {
+    let site = site_url.trim().trim_end_matches('/');
+    state
+        .db
+        .lock()
+        .unwrap()
+        .rename_ui_group(site, old_group.trim(), new_group.trim())
 }
 
 /// DB의 모든 UI 플로우를 JSON 파일로 내보낸다.

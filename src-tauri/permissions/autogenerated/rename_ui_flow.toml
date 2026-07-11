@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-ui-flow"
+description = "Enables the rename_ui_flow command without any pre-configured scope."
+commands.allow = ["rename_ui_flow"]
+
+[[permission]]
+identifier = "deny-rename-ui-flow"
+description = "Denies the rename_ui_flow command without any pre-configured scope."
+commands.deny = ["rename_ui_flow"]

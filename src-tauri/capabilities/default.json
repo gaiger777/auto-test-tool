@@ -40,6 +40,8 @@
     "allow-save-ui-run-step",
     "allow-finish-ui-run",
     "allow-list-ui-runs",
-    "allow-list-ui-run-steps"
+    "allow-list-ui-run-steps",
+    "allow-rename-ui-flow",
+    "allow-rename-ui-group"
   ]
 }

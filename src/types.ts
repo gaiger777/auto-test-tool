@@ -21,6 +21,10 @@ export interface Environment {
   mq_url: string
   mq_exchanges: string
   endpoints: Record<string, string>
+  mq_hosts: string
+  mq_user: string
+  mq_password: string
+  mq_vhost: string
 }
 
 export interface ScenarioRecord { id: number | null; name: string; description: string; steps_json: string }

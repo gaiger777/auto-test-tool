@@ -14,6 +14,15 @@ pub struct Environment {
     pub mq_url: String,
     pub mq_exchanges: String, // 쉼표 구분: "nova,neutron,cinder"
     pub endpoints: HashMap<String, String>, // {"nova": "http://nova:8774/v2.1", ...}
+    // RabbitMQ 클러스터: 여러 host:port(쉼표 구분) + 계정. 접속 시 순서대로 시도(페일오버).
+    #[serde(default)]
+    pub mq_hosts: String, // "10.255.40.2:5672,10.255.40.3:5672,10.255.40.4:5672"
+    #[serde(default)]
+    pub mq_user: String,
+    #[serde(default)]
+    pub mq_password: String,
+    #[serde(default)]
+    pub mq_vhost: String, // 기본 "/"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -170,6 +179,21 @@ impl Store {
             conn.execute("ALTER TABLE ui_flows ADD COLUMN grp TEXT NOT NULL DEFAULT ''", [])
                 .map_err(|e| e.to_string())?;
         }
+        // 마이그레이션: RabbitMQ 클러스터 호스트/계정 컬럼 추가.
+        for (col, default) in [
+            ("mq_hosts", "''"),
+            ("mq_user", "''"),
+            ("mq_password", "''"),
+            ("mq_vhost", "'/'"),
+        ] {
+            if !Self::has_column(&conn, "environments", col) {
+                conn.execute(
+                    &format!("ALTER TABLE environments ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}"),
+                    [],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
         Ok(Self { conn })
     }
 
@@ -194,9 +218,11 @@ impl Store {
                 self.conn
                     .execute(
                         "UPDATE environments SET name=?1, keystone_url=?2, user_name=?3, user_domain=?4,
-                         project_name=?5, project_domain=?6, mq_url=?7, mq_exchanges=?8, endpoints=?9 WHERE id=?10",
+                         project_name=?5, project_domain=?6, mq_url=?7, mq_exchanges=?8, endpoints=?9,
+                         mq_hosts=?11, mq_user=?12, mq_password=?13, mq_vhost=?14 WHERE id=?10",
                         params![env.name, env.keystone_url, env.user_name, env.user_domain,
-                                env.project_name, env.project_domain, env.mq_url, env.mq_exchanges, endpoints, id],
+                                env.project_name, env.project_domain, env.mq_url, env.mq_exchanges, endpoints, id,
+                                env.mq_hosts, env.mq_user, env.mq_password, env.mq_vhost],
                     )
                     .map_err(|e| e.to_string())?;
                 Ok(id)
@@ -205,10 +231,12 @@ impl Store {
                 self.conn
                     .execute(
                         "INSERT INTO environments (name, keystone_url, user_name, user_domain,
-                         project_name, project_domain, mq_url, mq_exchanges, endpoints)
-                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                         project_name, project_domain, mq_url, mq_exchanges, endpoints,
+                         mq_hosts, mq_user, mq_password, mq_vhost)
+                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                         params![env.name, env.keystone_url, env.user_name, env.user_domain,
-                                env.project_name, env.project_domain, env.mq_url, env.mq_exchanges, endpoints],
+                                env.project_name, env.project_domain, env.mq_url, env.mq_exchanges, endpoints,
+                                env.mq_hosts, env.mq_user, env.mq_password, env.mq_vhost],
                     )
                     .map_err(|e| e.to_string())?;
                 Ok(self.conn.last_insert_rowid())
@@ -219,7 +247,7 @@ impl Store {
     pub fn list_environments(&self) -> Result<Vec<Environment>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, name, keystone_url, user_name, user_domain, project_name, project_domain, mq_url, mq_exchanges, endpoints FROM environments ORDER BY id")
+            .prepare("SELECT id, name, keystone_url, user_name, user_domain, project_name, project_domain, mq_url, mq_exchanges, endpoints, mq_hosts, mq_user, mq_password, mq_vhost FROM environments ORDER BY id")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
@@ -242,6 +270,10 @@ impl Store {
                     mq_url: r.get(7)?,
                     mq_exchanges: r.get(8)?,
                     endpoints,
+                    mq_hosts: r.get(10)?,
+                    mq_user: r.get(11)?,
+                    mq_password: r.get(12)?,
+                    mq_vhost: r.get(13)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -392,6 +424,24 @@ impl Store {
             .execute("DELETE FROM ui_flows WHERE id=?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// 시나리오 이름 변경(같은 사이트에 이름 중복이면 UNIQUE 제약으로 실패).
+    pub fn rename_ui_flow(&self, id: i64, new_name: &str) -> Result<(), String> {
+        self.conn
+            .execute("UPDATE ui_flows SET name=?1 WHERE id=?2", params![new_name, id])
+            .map_err(|e| format!("이름 변경 실패(중복 가능): {e}"))?;
+        Ok(())
+    }
+
+    /// 그룹명 일괄 변경(해당 사이트에서 old_grp 인 시나리오 전부). 변경된 개수 반환.
+    pub fn rename_ui_group(&self, site_url: &str, old_grp: &str, new_grp: &str) -> Result<usize, String> {
+        self.conn
+            .execute(
+                "UPDATE ui_flows SET grp=?1 WHERE site_url=?2 AND grp=?3",
+                params![new_grp, site_url, old_grp],
+            )
+            .map_err(|e| e.to_string())
     }
 
     // --- runs / step_results ---
@@ -612,6 +662,10 @@ mod tests {
             mq_url: "amqp://guest:guest@mq:5672/%2f".into(),
             mq_exchanges: "nova,neutron,cinder".into(),
             endpoints: std::collections::HashMap::from([("nova".to_string(), "http://nova:8774/v2.1".to_string())]),
+            mq_hosts: "mq:5672".into(),
+            mq_user: "guest".into(),
+            mq_password: "guest".into(),
+            mq_vhost: "/".into(),
         }
     }
 

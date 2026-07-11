@@ -10,19 +10,13 @@ use tokio_util::sync::CancellationToken;
 /// cancel 시 태스크 종료 + 연결 정리.
 /// `app`이 Some이면 수신 메시지를 프론트로 `mq-log` 이벤트로도 흘린다(환경 화면 로그).
 pub async fn start_consumer(
-    mq_url: &str,
+    uris: &[String],
     exchanges: &[String],
     bus: Arc<EventBus>,
     cancel: CancellationToken,
     app: Option<AppHandle>,
 ) -> Result<(), String> {
-    let conn = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        Connection::connect(mq_url, ConnectionProperties::default()),
-    )
-    .await
-    .map_err(|_| "RabbitMQ 접속 타임아웃 (10초)".to_string())?
-    .map_err(|e| format!("RabbitMQ 접속 실패: {e}"))?;
+    let conn = connect_any(uris).await?;
     let channel = conn.create_channel().await.map_err(|e| format!("채널 생성 실패: {e}"))?;
 
     let queue = channel
@@ -90,6 +84,27 @@ pub async fn start_consumer(
         let _ = conn.close(200, "done".into()).await;
     });
     Ok(())
+}
+
+/// 클러스터 노드들을 순서대로 시도해 처음 성공한 연결을 돌려준다(페일오버). 모두 실패하면 마지막 에러.
+async fn connect_any(uris: &[String]) -> Result<Connection, String> {
+    if uris.is_empty() {
+        return Err("RabbitMQ 호스트가 비어 있습니다".into());
+    }
+    let mut last = String::new();
+    for uri in uris {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            Connection::connect(uri, ConnectionProperties::default()),
+        )
+        .await
+        {
+            Ok(Ok(conn)) => return Ok(conn),
+            Ok(Err(e)) => last = format!("접속 실패: {e}"),
+            Err(_) => last = "접속 타임아웃 (10초)".into(),
+        }
+    }
+    Err(format!("모든 RabbitMQ 노드 접속 실패 — {last}"))
 }
 
 /// 수신 바이트를 파싱·언랩해 버스에 싣는다. app이 있으면 프론트 로그로도 emit. 파싱 실패는 버리되 stderr에 남긴다.

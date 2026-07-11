@@ -102,6 +102,12 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
 
   const pickFlow = (f: UiFlowRecord) => { setItems([toItem(f)]); setLoadedLabel(f.name); setError('') }
   const pickMany = (flows: UiFlowRecord[], label: string) => { setItems(flows.map(toItem)); setLoadedLabel(label); setError('') }
+  const renameFlow = async (f: UiFlowRecord, newName: string) => {
+    try { await api.renameUiFlow(f.id!, newName); await reloadFlows(); window.dispatchEvent(new CustomEvent('ui-flows-changed')) } catch (e) { setError(String(e)) }
+  }
+  const renameGroup = async (site: string, oldGroup: string, newGroup: string) => {
+    try { await api.renameUiGroup(site, oldGroup, newGroup); await reloadFlows(); window.dispatchEvent(new CustomEvent('ui-flows-changed')) } catch (e) { setError(String(e)) }
+  }
 
   const changeEnv = async (v: number | null) => {
     setEnvId(v); setError('')
@@ -208,7 +214,8 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
         <div style={{ borderRight: '1px solid var(--vsc-border)', paddingRight: 12 }}>
           <strong style={{ fontSize: 13 }}>시나리오 트리</strong>
           <p className="dim" style={{ fontSize: 11, margin: '4px 0' }}>리프 클릭=단일, ▶=그룹/사이트 전체 불러오기</p>
-          <FlowTree flows={allFlows} onPickFlow={pickFlow} onPickMany={pickMany} />
+          <FlowTree flows={allFlows} onPickFlow={pickFlow} onPickMany={pickMany}
+            onRenameFlow={renameFlow} onRenameGroup={renameGroup} />
         </div>
 
         {/* 우측 실행 목록 */}
