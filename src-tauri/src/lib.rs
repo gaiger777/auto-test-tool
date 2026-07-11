@@ -26,12 +26,15 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db = store::Store::open(&dir.join("data.sqlite"))
                 .map_err(std::io::Error::other)?;
-            let _ = db.mark_interrupted_runs(&chrono::Utc::now().to_rfc3339());
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = db.mark_interrupted_runs(&now);
+            let _ = db.mark_interrupted_ui_runs(&now);
             app.manage(AppState {
                 db: Mutex::new(db),
                 active_runs: Mutex::new(Default::default()),
                 capture: Mutex::new(None),
                 replay: Mutex::new(None),
+                replay_bus: Mutex::new(None),
             });
             if let Some(main) = app.get_webview_window("main") {
                 // 캡처 창이 깨진 TLS(미신뢰 CA·호스트명 불일치·만료 등) 내부 서버도 로드하도록
@@ -87,7 +90,16 @@ pub fn run() {
             commands::delete_ui_flow,
             commands::export_ui_flows,
             commands::import_ui_flows,
-            commands::stop_ui_replay
+            commands::stop_ui_replay,
+            commands::resume_ui_replay,
+            commands::start_replay_mq,
+            commands::stop_replay_mq,
+            commands::run_wait_event,
+            commands::create_ui_run,
+            commands::save_ui_run_step,
+            commands::finish_ui_run,
+            commands::list_ui_runs,
+            commands::list_ui_run_steps
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

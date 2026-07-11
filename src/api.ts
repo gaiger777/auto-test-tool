@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { Environment, RunRecord, ScenarioRecord, StepResultRecord, UiAction, UiFlowRecord, UiFlowSite } from './types'
+import type { Condition, Environment, RunRecord, ScenarioRecord, StepResultRecord, UiAction, UiFlowRecord, UiFlowSite, UiRunRecord, UiRunStepRecord } from './types'
 
 export const listEnvironments = () => invoke<Environment[]>('list_environments')
 export const saveEnvironment = (env: Environment, password: string | null) =>
@@ -30,8 +30,8 @@ export const saveUiActions = (path: string, actions: UiAction[]) =>
 export const loadUiActions = (path: string) => invoke<UiAction[]>('load_ui_actions', { path })
 
 // UI 플로우 DB (사이트 URL별)
-export const saveUiFlow = (name: string, siteUrl: string, actions: UiAction[]) =>
-  invoke<number>('save_ui_flow', { name, siteUrl, actions })
+export const saveUiFlow = (name: string, siteUrl: string, group: string, actions: UiAction[]) =>
+  invoke<number>('save_ui_flow', { name, siteUrl, group, actions })
 export const listUiFlowSites = () => invoke<UiFlowSite[]>('list_ui_flow_sites')
 export const listUiFlows = (siteUrl: string) => invoke<UiFlowRecord[]>('list_ui_flows', { siteUrl })
 export const listAllUiFlows = () => invoke<UiFlowRecord[]>('list_all_ui_flows')
@@ -39,3 +39,20 @@ export const deleteUiFlow = (id: number) => invoke<void>('delete_ui_flow', { id 
 export const stopUiReplay = () => invoke<void>('stop_ui_replay')
 export const exportUiFlows = (path: string) => invoke<void>('export_ui_flows', { path })
 export const importUiFlows = (path: string) => invoke<number>('import_ui_flows', { path })
+
+// 인터리브 재생: wait_event 위임 후 같은 창에서 재개
+export const resumeUiReplay = (nextIdx: number, prevStatus: string, prevDetail: string) =>
+  invoke<void>('resume_ui_replay', { nextIdx, prevStatus, prevDetail })
+export const startReplayMq = (envId: number) => invoke<void>('start_replay_mq', { envId })
+export const stopReplayMq = () => invoke<void>('stop_replay_mq')
+export const runWaitEvent = (eventType: string, conditions: Condition[], timeoutSecs: number) =>
+  invoke<string>('run_wait_event', { eventType, conditions, timeoutSecs })
+
+// UI 실행 히스토리
+export const createUiRun = (flowId: number | null, flowName: string, siteUrl: string) =>
+  invoke<number>('create_ui_run', { flowId, flowName, siteUrl })
+export const saveUiRunStep = (runId: number, stepIndex: number, kind: string, name: string, status: string, detail: string) =>
+  invoke<void>('save_ui_run_step', { runId, stepIndex, kind, name, status, detail })
+export const finishUiRun = (runId: number, status: string) => invoke<void>('finish_ui_run', { runId, status })
+export const listUiRuns = () => invoke<UiRunRecord[]>('list_ui_runs')
+export const listUiRunSteps = (runId: number) => invoke<UiRunStepRecord[]>('list_ui_run_steps', { runId })

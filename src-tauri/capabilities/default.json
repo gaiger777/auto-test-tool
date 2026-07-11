@@ -31,6 +31,15 @@
     "allow-delete-ui-flow",
     "allow-export-ui-flows",
     "allow-import-ui-flows",
-    "allow-stop-ui-replay"
+    "allow-stop-ui-replay",
+    "allow-resume-ui-replay",
+    "allow-start-replay-mq",
+    "allow-stop-replay-mq",
+    "allow-run-wait-event",
+    "allow-create-ui-run",
+    "allow-save-ui-run-step",
+    "allow-finish-ui-run",
+    "allow-list-ui-runs",
+    "allow-list-ui-run-steps"
   ]
 }

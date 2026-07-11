@@ -2,13 +2,18 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
+import { runDelegatedStep } from '../replayDelegate'
+import { kindLabel, stepSummary } from '../uiStep'
 import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
-import type { UiAction, UiStepResult, UiFlowSite } from '../types'
+import FlowTree from '../components/FlowTree'
+import MqLogPanel from '../components/MqLogPanel'
+import type { Environment, UiAction, UiStepResult, UiFlowRecord } from '../types'
 
 interface SuiteItem {
   id: number
   name: string
   siteUrl: string
+  grp: string
   actions: UiAction[]
   status: 'idle' | 'running' | 'passed' | 'failed'
   detail: string
@@ -16,10 +21,19 @@ interface SuiteItem {
   stepResults: Record<number, { status: string; detail: string }>
 }
 
-export default function UiSuiteView() {
-  const [sites, setSites] = useState<UiFlowSite[]>([])
-  const [selectedSite, setSelectedSite] = useState('')
+const toItem = (f: UiFlowRecord): SuiteItem => ({
+  id: f.id!, name: f.name, siteUrl: f.site_url, grp: f.grp || '',
+  actions: JSON.parse(f.actions_json) as UiAction[],
+  status: 'idle', detail: '', expanded: false, stepResults: {},
+})
+
+export default function UiSuiteView({ active }: { active?: boolean }) {
+  const [allFlows, setAllFlows] = useState<UiFlowRecord[]>([])
+  const [loadedLabel, setLoadedLabel] = useState('')
   const [items, setItems] = useState<SuiteItem[]>([])
+  const [envs, setEnvs] = useState<Environment[]>([])
+  const [envId, setEnvId] = useState<number | null>(null)
+  const [mqOn, setMqOn] = useState(false)
   const [runningAll, setRunningAll] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
@@ -28,21 +42,28 @@ export default function UiSuiteView() {
   const itemsRef = useRef<SuiteItem[]>([])
   useEffect(() => { itemsRef.current = items }, [items])
   const runningIdx = useRef<number | null>(null)
+  const runIdRef = useRef<number | null>(null)
   const queue = useRef<number[]>([])
+  const envIdRef = useRef<number | null>(null)
+  useEffect(() => { envIdRef.current = envId }, [envId])
 
-  const loadSites = async () => {
-    try { setSites(await api.listUiFlowSites()) } catch (e) { setError(String(e)) }
-  }
+  const reloadFlows = () => api.listAllUiFlows().then(setAllFlows).catch(e => setError(String(e)))
   useEffect(() => {
-    loadSites()
-    const h = () => loadSites() // 캡처 탭에서 DB 저장 시 자동 갱신
+    reloadFlows()
+    api.listEnvironments().then(setEnvs).catch(() => {})
+    const h = () => reloadFlows() // 레코더에서 DB 저장 시 자동 갱신
     window.addEventListener('ui-flows-changed', h)
-    return () => window.removeEventListener('ui-flows-changed', h)
+    return () => {
+      window.removeEventListener('ui-flows-changed', h)
+      api.stopReplayMq().catch(() => {}) // 화면 벗어나면 MQ 로그 세션 정리
+    }
   }, [])
 
   const finishItem = (i: number, status: 'passed' | 'failed', detail: string) => {
     setItems(list => list.map((x, j) => (j === i ? { ...x, status, detail } : x)))
-    runningIdx.current = null
+    const runId = runIdRef.current
+    if (runId != null) { api.finishUiRun(runId, status).catch(() => {}); window.dispatchEvent(new CustomEvent('ui-run-finished')) }
+    runningIdx.current = null; runIdRef.current = null
     if (queue.current.length) { const next = queue.current.shift()!; startItem(next) }
     else setRunningAll(false)
   }
@@ -51,10 +72,12 @@ export default function UiSuiteView() {
     if (!it) return
     runningIdx.current = i
     setItems(list => list.map((x, j) => (j === i ? { ...x, status: 'running', detail: '', stepResults: {} } : x)))
-    const url = it.actions[0]?.url || it.siteUrl
+    const url = it.actions.find(a => a.url)?.url || it.siteUrl
     if (!url) { finishItem(i, 'failed', '시작 URL이 없습니다'); return }
-    try { await api.startUiReplay(url, it.actions) }
-    catch (e) { finishItem(i, 'failed', String(e)) }
+    try {
+      runIdRef.current = await api.createUiRun(it.id, it.name, it.siteUrl)
+      await api.startUiReplay(url, it.actions)
+    } catch (e) { finishItem(i, 'failed', String(e)) }
   }
 
   useEffect(() => {
@@ -62,25 +85,30 @@ export default function UiSuiteView() {
       const r = e.payload
       const i = runningIdx.current
       if (i == null) return
+      if (r.status === 'delegate') { runDelegatedStep(r.index, r.detail, envIdRef.current); return }
       if (r.done) { finishItem(i, r.status, r.detail); return }
       setItems(list => list.map((x, j) =>
         j === i ? { ...x, stepResults: { ...x.stepResults, [r.index]: { status: r.status, detail: r.detail } } } : x))
+      const it = itemsRef.current[i]
+      const runId = runIdRef.current
+      if (it && runId != null && r.index >= 0) {
+        const a = it.actions[r.index]
+        api.saveUiRunStep(runId, r.index, a?.kind || '', a?.name || '', r.status, r.detail).catch(() => {})
+      }
     })
     return () => { un.then(u => u()) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const loadSite = async () => {
-    setError(''); setInfo('')
-    if (!selectedSite) { setError('사이트 URL을 선택하세요'); return }
+  const pickFlow = (f: UiFlowRecord) => { setItems([toItem(f)]); setLoadedLabel(f.name); setError('') }
+  const pickMany = (flows: UiFlowRecord[], label: string) => { setItems(flows.map(toItem)); setLoadedLabel(label); setError('') }
+
+  const changeEnv = async (v: number | null) => {
+    setEnvId(v); setError('')
     try {
-      const flows = await api.listUiFlows(selectedSite)
-      setItems(flows.map(f => ({
-        id: f.id!, name: f.name, siteUrl: f.site_url,
-        actions: JSON.parse(f.actions_json) as UiAction[],
-        status: 'idle' as const, detail: '', expanded: false, stepResults: {},
-      })))
-    } catch (e) { setError(String(e)) }
+      if (v != null) { await api.startReplayMq(v); setMqOn(true) }
+      else { await api.stopReplayMq(); setMqOn(false) }
+    } catch (e) { setMqOn(false); setError('MQ 연결 실패: ' + String(e)) }
   }
 
   const move = (i: number, d: -1 | 1) => {
@@ -94,41 +122,51 @@ export default function UiSuiteView() {
     try {
       await api.deleteUiFlow(it.id)
       setItems(list => list.filter((_, j) => j !== i))
-      loadSites()
-      window.dispatchEvent(new CustomEvent('ui-flows-changed')) // 캡처 화면 드롭다운도 갱신
+      reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
     } catch (e) { setError(String(e)) }
   }
   const toggleExpand = (i: number) => setItems(list => list.map((x, j) => (j === i ? { ...x, expanded: !x.expanded } : x)))
 
-  // 스위트 내에서 동작별 개별 삭제 (DB에도 반영)
   const delAction = async (i: number, k: number) => {
     const it = itemsRef.current[i]
     if (!it) return
     const next = it.actions.filter((_, x) => x !== k)
     setItems(list => list.map((y, j) => (j === i ? { ...y, actions: next, stepResults: {} } : y)))
-    try { await api.saveUiFlow(it.name, it.siteUrl, next) } catch (e) { setError(String(e)) }
+    try { await api.saveUiFlow(it.name, it.siteUrl, it.grp, next) } catch (e) { setError(String(e)) }
   }
 
   const cancelRun = async () => {
     queue.current = []
     const i = runningIdx.current
-    runningIdx.current = null
+    runningIdx.current = null; runIdRef.current = null
     setRunningAll(false)
     try { await api.stopUiReplay() } catch { /* noop */ }
     if (i != null) setItems(list => list.map((x, j) => (j === i ? { ...x, status: 'idle', detail: '취소됨' } : x)))
   }
 
-  const runAll = () => {
+  // wait_event 스텝이 있으면 MQ 세션 필요 → 환경 확인/연결.
+  const ensureMq = async (idxs: number[]): Promise<boolean> => {
+    const needsMq = idxs.some(i => itemsRef.current[i]?.actions.some(a => a.kind === 'wait_event'))
+    if (!needsMq) return true
+    if (envId == null) { setError('wait_event 스텝이 있어 환경(MQ) 선택이 필요합니다'); return false }
+    if (!mqOn) { try { await api.startReplayMq(envId); setMqOn(true) } catch (e) { setError('MQ 연결 실패: ' + String(e)); return false } }
+    return true
+  }
+
+  const runAll = async () => {
     if (!items.length || runningIdx.current != null) return
     setError('')
+    if (!(await ensureMq(items.map((_, i) => i)))) return
     setItems(list => list.map(x => ({ ...x, status: 'idle', detail: '', stepResults: {} })))
     queue.current = items.map((_, i) => i)
     setRunningAll(true)
     startItem(queue.current.shift()!)
   }
-  const runOne = (i: number) => {
+  const runOne = async (i: number) => {
     if (runningIdx.current != null) return
     queue.current = []; setRunningAll(false); setError('')
+    if (!(await ensureMq([i]))) return
     startItem(i)
   }
 
@@ -145,83 +183,102 @@ export default function UiSuiteView() {
     if (r) return r.status === 'passed' ? '✅' : '❌'
     return it.status === 'running' ? '⏳' : ''
   }
+  void active
 
   return (
     <div>
-      <h2>UI 테스트 스위트</h2>
-      <p className="dim">DB에서 사이트 URL을 골라 저장된 시나리오를 불러와 개별/전체 실행합니다. 파일명을 눌러 펼치면 개별 동작이 보입니다.</p>
+      <h2>시나리오 실행</h2>
+      <p className="dim">왼쪽 트리에서 사이트·그룹·시나리오를 골라 불러온 뒤 개별/전체 실행합니다. 실행 결과는 히스토리 탭에 기록됩니다.</p>
       <div className="add-row">
-        <select value={selectedSite} onChange={e => setSelectedSite(e.target.value)} style={{ minWidth: 320 }}>
-          <option value="">사이트 URL 선택</option>
-          {sites.map(s => <option key={s.site_url} value={s.site_url}>{s.site_url}</option>)}
+        <select value={envId ?? ''} onChange={e => changeEnv(e.target.value ? Number(e.target.value) : null)} disabled={busy} title="wait_event·RabbitMQ 로그용 환경">
+          <option value="">환경 없음</option>
+          {envs.map(en => <option key={en.id} value={en.id!}>{en.name}</option>)}
         </select>
-        <button onClick={loadSite} disabled={!selectedSite || busy}>불러오기</button>
-        <button onClick={loadSites} disabled={busy}>사이트 새로고침</button>
-        <button className="accent" onClick={runAll} disabled={!items.length || busy}>
-          {runningAll ? '전체 실행 중…' : '▶ 전체 실행'}
-        </button>
-        {busy && <button className="danger" onClick={cancelRun}>취소</button>}
+        {mqOn && <span className="dim">RabbitMQ 연결됨</span>}
         <span style={{ flex: 1 }} />
+        <button onClick={reloadFlows} disabled={busy}>트리 새로고침</button>
         <button onClick={doExport} disabled={busy}>DB 내보내기</button>
       </div>
 
       {error && <p className="error">{error}</p>}
       {info && <p className="dim">{info}</p>}
 
-      <table className="history">
-        <thead>
-          <tr><th></th><th>#</th><th>시나리오</th><th>동작수</th><th>상태</th><th>세부</th><th>실행</th><th>순서/삭제</th></tr>
-        </thead>
-        <tbody>
-          {items.map((it, i) => (
-            <Fragment key={it.id}>
-              <tr>
-                <td><button onClick={() => toggleExpand(i)} title="펼치기">{it.expanded ? '▾' : '▸'}</button></td>
-                <td>{i + 1}</td>
-                <td style={{ cursor: 'pointer' }} onClick={() => toggleExpand(i)}>{it.name}</td>
-                <td>{it.actions.length}</td>
-                <td>{fileIcon(it.status)}</td>
-                <td className="dim" title={it.detail} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.detail}</td>
-                <td><button onClick={() => runOne(i)} disabled={busy}>개별 실행</button></td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  <button onClick={() => move(i, -1)} disabled={i === 0 || busy}>↑</button>
-                  <button onClick={() => move(i, 1)} disabled={i === items.length - 1 || busy}>↓</button>
-                  <button className="danger" onClick={() => remove(i)} disabled={busy}>✕</button>
-                </td>
-              </tr>
-              {it.expanded && (
-                <tr>
-                  <td></td>
-                  <td colSpan={7} style={{ background: 'var(--vsc-bg-alt)' }}>
-                    <table className="history" style={{ margin: 0 }}>
-                      <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터</th><th>값</th><th>API</th><th>결과</th><th>삭제</th></tr></thead>
-                      <tbody>
-                        {it.actions.map((a, k) => (
-                          <tr key={a.id + k}>
-                            <td>{k + 1}</td>
-                            <td>{a.kind === 'click' ? '클릭' : a.kind === 'input' ? '입력' : '호버'}</td>
-                            <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
-                            <td className="dim" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n')}>
-                              {a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''}
-                            </td>
-                            <td>{a.value ?? ''}</td>
-                            <td>{(a.api?.length || 0) > 0
-                              ? <button onClick={() => setModalCalls({ title: a.name || `동작 ${k + 1}`, calls: a.api as CallLike[] })} title="유발된 네트워크 호출 보기 (누르면 상세)">▸ {a.api!.length}</button>
-                              : <span className="dim">0</span>}</td>
-                            <td title={it.stepResults[k]?.detail || ''}>{stepIcon(it, k)}</td>
-                            <td><button className="danger" onClick={() => delAction(i, k)} disabled={busy}>✕</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </td>
-                </tr>
-              )}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+      <div className="two-col" style={{ gridTemplateColumns: '280px 1fr', alignItems: 'start', gap: 16 }}>
+        {/* 좌측 트리 */}
+        <div style={{ borderRight: '1px solid var(--vsc-border)', paddingRight: 12 }}>
+          <strong style={{ fontSize: 13 }}>시나리오 트리</strong>
+          <p className="dim" style={{ fontSize: 11, margin: '4px 0' }}>리프 클릭=단일, ▶=그룹/사이트 전체 불러오기</p>
+          <FlowTree flows={allFlows} onPickFlow={pickFlow} onPickMany={pickMany} />
+        </div>
+
+        {/* 우측 실행 목록 */}
+        <div>
+          <div className="add-row">
+            <strong>{loadedLabel ? `불러옴: ${loadedLabel} (${items.length})` : '시나리오를 트리에서 불러오세요'}</strong>
+            <button className="accent" onClick={runAll} disabled={!items.length || busy}>
+              {runningAll ? '전체 실행 중…' : '▶ 전체 실행'}
+            </button>
+            {busy && <button className="danger" onClick={cancelRun}>취소</button>}
+          </div>
+
+          <table className="history">
+            <thead>
+              <tr><th></th><th>#</th><th>시나리오</th><th>동작수</th><th>상태</th><th>세부</th><th>실행</th><th>순서/삭제</th></tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <Fragment key={it.id}>
+                  <tr>
+                    <td><button onClick={() => toggleExpand(i)} title="펼치기">{it.expanded ? '▾' : '▸'}</button></td>
+                    <td>{i + 1}</td>
+                    <td style={{ cursor: 'pointer' }} onClick={() => toggleExpand(i)}>{it.name}</td>
+                    <td>{it.actions.length}</td>
+                    <td>{fileIcon(it.status)}</td>
+                    <td className="dim" title={it.detail} style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.detail}</td>
+                    <td><button onClick={() => runOne(i)} disabled={busy}>개별 실행</button></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button onClick={() => move(i, -1)} disabled={i === 0 || busy}>↑</button>
+                      <button onClick={() => move(i, 1)} disabled={i === items.length - 1 || busy}>↓</button>
+                      <button className="danger" onClick={() => remove(i)} disabled={busy}>✕</button>
+                    </td>
+                  </tr>
+                  {it.expanded && (
+                    <tr>
+                      <td></td>
+                      <td colSpan={7} style={{ background: 'var(--vsc-bg-alt)' }}>
+                        <table className="history" style={{ margin: 0 }}>
+                          <thead><tr><th>#</th><th>동작</th><th>이름</th><th>셀렉터/설정</th><th>값</th><th>API</th><th>결과</th><th>삭제</th></tr></thead>
+                          <tbody>
+                            {it.actions.map((a, k) => (
+                              <tr key={a.id + k}>
+                                <td>{k + 1}</td>
+                                <td>{kindLabel(a.kind)}</td>
+                                <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
+                                <td className="dim" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                  title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n') || stepSummary(a)}>
+                                  {stepSummary(a)}
+                                </td>
+                                <td>{a.value ?? ''}</td>
+                                <td>{(a.api?.length || 0) > 0
+                                  ? <button onClick={() => setModalCalls({ title: a.name || `동작 ${k + 1}`, calls: a.api as CallLike[] })} title="유발된 네트워크 호출 보기">▸ {a.api!.length}</button>
+                                  : <span className="dim">0</span>}</td>
+                                <td title={it.stepResults[k]?.detail || ''}>{stepIcon(it, k)}</td>
+                                <td><button className="danger" onClick={() => delAction(i, k)} disabled={busy}>✕</button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {envId != null && <MqLogPanel />}
 
       {modalCalls && <ApiCallsModal title={modalCalls.title} calls={modalCalls.calls} onClose={() => setModalCalls(null)} />}
     </div>

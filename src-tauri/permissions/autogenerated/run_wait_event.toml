@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-wait-event"
+description = "Enables the run_wait_event command without any pre-configured scope."
+commands.allow = ["run_wait_event"]
+
+[[permission]]
+identifier = "deny-run-wait-event"
+description = "Denies the run_wait_event command without any pre-configured scope."
+commands.deny = ["run_wait_event"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-ui-run"
+description = "Enables the create_ui_run command without any pre-configured scope."
+commands.allow = ["create_ui_run"]
+
+[[permission]]
+identifier = "deny-create-ui-run"
+description = "Denies the create_ui_run command without any pre-configured scope."
+commands.deny = ["create_ui_run"]

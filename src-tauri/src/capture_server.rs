@@ -39,9 +39,11 @@ pub struct UiCall {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UiAction {
     pub id: String,
-    pub kind: String, // "click" | "input" | "hover"
+    pub kind: String, // "click" | "input" | "hover" | "http_call" | "wait_event" | "assert" | "sleep"
+    #[serde(default)]
     pub selectors: Vec<UiSelector>,
     pub name: String,
+    #[serde(default)]
     pub value: Option<String>,
     /// 링크 클릭이면 절대 URL. 재생 시 요소를 못 찾으면 이 URL로 폴백 이동.
     #[serde(default)]
@@ -49,8 +51,13 @@ pub struct UiAction {
     /// 이 동작이 유발한 네트워크 호출(저장 시 상관 결과를 함께 보관 → 스위트에서 표시).
     #[serde(default)]
     pub api: Vec<UiCall>,
+    #[serde(default)]
     pub url: String,
+    #[serde(default)]
     pub timestamp: i64,
+    /// 프로그램 스텝(http_call/wait_event/assert/sleep)의 설정. UI 스텝이면 없음.
+    #[serde(default)]
+    pub step: Option<serde_json::Value>,
 }
 
 /// UI 재생 중 한 스텝의 결과. 플레이어 스크립트가 `ui_replay_step` 커맨드로 보고한다.

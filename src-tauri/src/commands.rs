@@ -7,6 +7,7 @@ use crate::models::{Scenario, StepDef, Vars};
 use crate::mq;
 use crate::store::{
     self, Environment, RunRecord, ScenarioRecord, StepResultRecord, Store, UiFlowRecord, UiFlowSite,
+    UiRunRecord, UiRunStepRecord,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,6 +20,8 @@ pub struct AppState {
     pub capture: Mutex<Option<CaptureHandle>>,
     /// 현재 UI 재생 세션 토큰 (캡처와 독립 — 스위트 연속 실행 시 교체 가능).
     pub replay: Mutex<Option<String>>,
+    /// UI 재생 흐름의 wait_event 스텝을 위한 MQ 세션(환경 선택 시). 흐름 시작 시 연결해 버퍼링.
+    pub replay_bus: Mutex<Option<(Arc<EventBus>, CancellationToken)>>,
 }
 
 pub struct CaptureHandle {
@@ -204,7 +207,7 @@ pub async fn run_scenario(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone()).await?;
+        mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone(), None).await?;
         // base_url 변수
         for (svc, url) in &env.endpoints {
             run_vars.insert(format!("base_url.{svc}"), url.trim_end_matches('/').to_string());
@@ -451,6 +454,149 @@ pub fn stop_ui_replay(app: AppHandle, state: State<AppState>) -> Result<(), Stri
     Ok(())
 }
 
+/// wait_event 위임 실행 후, 같은 재생 창에서 다음 스텝부터 재개시킨다.
+#[tauri::command]
+pub fn resume_ui_replay(
+    app: AppHandle,
+    next_idx: i64,
+    prev_status: String,
+    prev_detail: String,
+) -> Result<(), String> {
+    let win = app
+        .get_webview_window("replay")
+        .ok_or("재생 창이 없습니다")?;
+    let js = format!(
+        "window.__replayResume && window.__replayResume({}, {}, {})",
+        next_idx,
+        serde_json::to_string(&prev_status).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(&prev_detail).unwrap_or_else(|_| "\"\"".into()),
+    );
+    win.eval(&js).map_err(|e| e.to_string())
+}
+
+/// MQ 세션을 시작한다(환경 선택 시). wait_event 대기 + 프론트 실시간 로그(mq-log)를 겸한다.
+#[tauri::command]
+pub async fn start_replay_mq(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    env_id: i64,
+) -> Result<(), String> {
+    // 기존 세션 정리
+    if let Some((_, cancel)) = state.replay_bus.lock().unwrap().take() {
+        cancel.cancel();
+    }
+    let env = state.db.lock().unwrap().get_environment(env_id)?;
+    let bus = EventBus::new();
+    let cancel = CancellationToken::new();
+    let exchanges: Vec<String> = env
+        .mq_exchanges
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    mq::start_consumer(&env.mq_url, &exchanges, bus.clone(), cancel.clone(), Some(app)).await?;
+    *state.replay_bus.lock().unwrap() = Some((bus, cancel));
+    Ok(())
+}
+
+/// UI 재생 흐름의 MQ 세션을 종료한다.
+#[tauri::command]
+pub fn stop_replay_mq(state: State<AppState>) -> Result<(), String> {
+    if let Some((_, cancel)) = state.replay_bus.lock().unwrap().take() {
+        cancel.cancel();
+    }
+    Ok(())
+}
+
+/// wait_event 스텝을 백엔드 MQ 세션으로 실행한다. (start_replay_mq 로 세션이 먼저 있어야 함)
+#[tauri::command]
+pub async fn run_wait_event(
+    state: State<'_, AppState>,
+    event_type: String,
+    conditions: Vec<crate::models::Condition>,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let bus = {
+        let g = state.replay_bus.lock().unwrap();
+        match g.as_ref() {
+            Some((b, _)) => b.clone(),
+            None => return Err("MQ 세션이 없습니다. 환경을 선택해 실행을 시작하세요.".into()),
+        }
+    };
+    let conds: Vec<(String, String)> = conditions
+        .iter()
+        .map(|c| (c.json_path.clone(), c.equals.clone()))
+        .collect();
+    let compiled = crate::matcher::compile_conditions(&conds)?;
+    let et = event_type.clone();
+    let event = bus
+        .wait_for(
+            move |e| crate::matcher::matches(e, &et, &compiled),
+            std::time::Duration::from_secs(timeout_secs),
+        )
+        .await?;
+    let s = event.to_string();
+    Ok(if s.len() > 2000 { s[..2000].to_string() } else { s })
+}
+
+// --- UI 실행 히스토리 ---
+
+#[tauri::command]
+pub fn create_ui_run(
+    state: State<AppState>,
+    flow_id: Option<i64>,
+    flow_name: String,
+    site_url: String,
+) -> Result<i64, String> {
+    state
+        .db
+        .lock()
+        .unwrap()
+        .create_ui_run(flow_id, &flow_name, &site_url, &now())
+}
+
+#[tauri::command]
+pub fn save_ui_run_step(
+    state: State<AppState>,
+    run_id: i64,
+    step_index: i64,
+    kind: String,
+    name: String,
+    status: String,
+    detail: String,
+) -> Result<(), String> {
+    state.db.lock().unwrap().save_ui_run_step(&UiRunStepRecord {
+        run_id,
+        step_index,
+        kind,
+        name,
+        status,
+        detail,
+    })
+}
+
+#[tauri::command]
+pub fn finish_ui_run(state: State<AppState>, run_id: i64, status: String) -> Result<(), String> {
+    state
+        .db
+        .lock()
+        .unwrap()
+        .finish_ui_run(run_id, &status, &now())
+}
+
+#[tauri::command]
+pub fn list_ui_runs(state: State<AppState>) -> Result<Vec<UiRunRecord>, String> {
+    state.db.lock().unwrap().list_ui_runs()
+}
+
+#[tauri::command]
+pub fn list_ui_run_steps(
+    state: State<AppState>,
+    run_id: i64,
+) -> Result<Vec<UiRunStepRecord>, String> {
+    state.db.lock().unwrap().list_ui_run_steps(run_id)
+}
+
 /// 기록한 UI 동작 목록을 JSON 파일로 저장한다.
 #[tauri::command]
 pub fn save_ui_actions(path: String, actions: Vec<capture_server::UiAction>) -> Result<(), String> {
@@ -473,6 +619,7 @@ pub fn save_ui_flow(
     state: State<AppState>,
     name: String,
     site_url: String,
+    group: Option<String>,
     actions: Vec<capture_server::UiAction>,
 ) -> Result<i64, String> {
     if name.trim().is_empty() {
@@ -480,8 +627,9 @@ pub fn save_ui_flow(
     }
     // URL 정규화: 끝의 / 제거 → 같은 사이트가 여러 항목으로 갈라지지 않게
     let site = site_url.trim().trim_end_matches('/');
+    let grp = group.unwrap_or_default();
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
-    state.db.lock().unwrap().save_ui_flow(name.trim(), site, &json, &now())
+    state.db.lock().unwrap().save_ui_flow(name.trim(), site, grp.trim(), &json, &now())
 }
 
 /// DB의 모든 UI 플로우(편집용 불러오기 목록).
@@ -525,7 +673,7 @@ pub fn import_ui_flows(state: State<AppState>, path: String) -> Result<usize, St
     let now = now();
     for f in &flows {
         let site = f.site_url.trim().trim_end_matches('/');
-        db.save_ui_flow(f.name.trim(), site, &f.actions_json, &now)?;
+        db.save_ui_flow(f.name.trim(), site, f.grp.trim(), &f.actions_json, &now)?;
     }
     Ok(flows.len())
 }
