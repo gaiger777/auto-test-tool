@@ -1,6 +1,6 @@
 use crate::events::EventBus;
 use futures_util::StreamExt;
-use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, ExchangeKind};
+use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
@@ -28,28 +28,35 @@ pub async fn start_consumer(
         .await
         .map_err(|e| format!("큐 생성 실패: {e}"))?;
 
+    // 존재하지 않는 exchange 하나가 전체 연결을 끊지 않도록, 바인딩을 exchange별 임시 채널에서
+    // 시도한다(실패하면 그 채널만 닫히고 경고 후 계속). 바인딩은 큐의 서버측 상태라 채널을 닫아도 유지된다.
+    let mut bound = 0;
     for ex in exchanges {
-        // OpenStack notification exchange는 topic 타입. passive=true로 존재 확인만 한다.
-        channel
-            .exchange_declare(
-                ex.as_str().into(),
-                ExchangeKind::Topic,
-                ExchangeDeclareOptions { passive: true, ..Default::default() },
-                FieldTable::default(),
-            )
-            .await
-            .map_err(|e| format!("exchange '{ex}' 확인 실패: {e}"))?;
-        channel
+        let ch = match conn.create_channel().await {
+            Ok(c) => c,
+            Err(e) => { warn(&app, format!("채널 생성 실패({ex}): {e}")); continue; }
+        };
+        match ch
             .queue_bind(
                 queue.name().as_str().into(),
                 ex.as_str().into(),
-                // oslo.messaging 기본 notification_topics("notifications") 가정 — 커스텀 토픽 배포는 v2에서 설정화
+                // oslo.messaging 기본 notification_topics("notifications") 가정
                 "notifications.#".into(),
                 QueueBindOptions::default(),
                 FieldTable::default(),
             )
             .await
-            .map_err(|e| format!("바인딩 실패({ex}): {e}"))?;
+        {
+            Ok(_) => {
+                bound += 1;
+                warn(&app, format!("exchange '{ex}' 바인딩됨"));
+                let _ = ch.close(200, "bound".into()).await;
+            }
+            Err(e) => warn(&app, format!("exchange '{ex}' 건너뜀: {e}")),
+        }
+    }
+    if bound == 0 {
+        warn(&app, "바인딩된 exchange가 없습니다. exchange 이름을 확인하세요.".into());
     }
 
     let mut consumer = channel
@@ -84,6 +91,14 @@ pub async fn start_consumer(
         let _ = conn.close(200, "done".into()).await;
     });
     Ok(())
+}
+
+/// 프론트 로그(mq-log)로 안내 메시지를 흘리고 stderr에도 남긴다.
+fn warn(app: &Option<AppHandle>, msg: String) {
+    if let Some(a) = app {
+        let _ = a.emit("mq-log", serde_json::json!({ "event_type": "(안내)", "text": msg }));
+    }
+    eprintln!("[mq] {msg}");
 }
 
 /// 클러스터 노드들을 순서대로 시도해 처음 성공한 연결을 돌려준다(페일오버). 모두 실패하면 마지막 에러.
