@@ -33,8 +33,15 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   const [loadedLabel, setLoadedLabel] = useState('')
   const [items, setItems] = useState<SuiteItem[]>([])
   const [envs, setEnvs] = useState<Environment[]>([])
-  // 환경(MQ 세션)은 전역 mqSession — 탭 전환에도 유지, 환경 화면과 공유.
-  const envId = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
+  // 이 화면의 환경 선택(화면별 독립, localStorage로 지속). MQ 연결 자체는 mqSession(공유).
+  const [envId, setEnvId] = useState<number | null>(() => {
+    const s = localStorage.getItem('runner.envId'); return s ? Number(s) : null
+  })
+  const setEnv = (v: number | null) => {
+    setEnvId(v)
+    if (v == null) localStorage.removeItem('runner.envId'); else localStorage.setItem('runner.envId', String(v))
+  }
+  const connectedEnv = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
   const [runningAll, setRunningAll] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
@@ -109,7 +116,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   }
 
   const changeEnv = async (v: number | null) => {
-    setError('')
+    setError(''); setEnv(v)
     try {
       if (v != null) await mqSession.start(v)
       else await mqSession.stop()
@@ -155,7 +162,11 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     const needsMq = idxs.some(i => itemsRef.current[i]?.actions.some(a => a.kind === 'wait_event'))
     if (!needsMq) return true
     if (envId == null) { setError('wait_event 스텝이 있어 환경(MQ) 선택이 필요합니다'); return false }
-    return true // 환경 선택 시 이미 mqSession.start 로 연결됨
+    // 공유 연결이 이 환경이 아니면(다른 화면이 중단/변경했을 수 있음) 다시 연결한다.
+    if (mqSession.getEnvId() !== envId) {
+      try { await mqSession.start(envId) } catch (e) { setError('MQ 연결 실패: ' + String(e)); return false }
+    }
+    return true
   }
 
   const runAll = async () => {
@@ -198,7 +209,9 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
           <option value="">환경 없음</option>
           {envs.map(en => <option key={en.id} value={en.id!}>{en.name}</option>)}
         </select>
-        {envId != null && <span className="dim">RabbitMQ 연결됨</span>}
+        {envId != null && (connectedEnv === envId
+          ? <span className="dim">RabbitMQ 연결됨</span>
+          : <span className="dim">연결 대기(실행 시 연결)</span>)}
         <span style={{ flex: 1 }} />
         <button onClick={reloadFlows} disabled={busy}>트리 새로고침</button>
         <button onClick={doExport} disabled={busy}>DB 내보내기</button>

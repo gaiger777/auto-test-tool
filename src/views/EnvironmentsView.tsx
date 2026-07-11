@@ -20,8 +20,15 @@ export default function EnvironmentsView() {
   const [hosts, setHosts] = useState<HostRow[]>([{ id: 0, v: '' }])
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
-  // 로그 세션은 전역(mqSession) — 탭을 벗어나도 유지된다.
-  const logEnvId = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
+  // 이 화면의 로그 대상(화면별 독립, localStorage로 탭 전환에도 지속). 러너 선택과 무관.
+  const [logEnvId, setLogEnvId] = useState<number | null>(() => {
+    const s = localStorage.getItem('env.logEnvId'); return s ? Number(s) : null
+  })
+  const setLog = (id: number | null) => {
+    setLogEnvId(id)
+    if (id == null) localStorage.removeItem('env.logEnvId'); else localStorage.setItem('env.logEnvId', String(id))
+  }
+  const connectedEnv = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
   const nextId = useRef(1)
   const mkRows = (vals: string[]): HostRow[] =>
     (vals.length ? vals : ['']).map(v => ({ id: nextId.current++, v }))
@@ -64,11 +71,11 @@ export default function EnvironmentsView() {
   }
 
   const startLog = async (env: Environment) => {
-    setError('')
+    setError(''); setLog(env.id!)
     try { await mqSession.start(env.id!) }
     catch (e) { setError('RabbitMQ 연결 실패: ' + String(e)) }
   }
-  const stopLog = async () => { await mqSession.stop() }
+  const stopLog = async () => { setLog(null); await mqSession.stop() }
 
   return (
     <div>
@@ -132,7 +139,10 @@ export default function EnvironmentsView() {
 
       {logEnvId != null && (
         <div style={{ marginTop: 12 }}>
-          <p className="dim">"{envs.find(e => e.id === logEnvId)?.name}" 환경의 RabbitMQ 실시간 로그</p>
+          <p className="dim">
+            "{envs.find(e => e.id === logEnvId)?.name}" 환경의 RabbitMQ 실시간 로그
+            {connectedEnv === logEnvId ? '' : ' · (다른 환경이 연결 중이거나 끊김 — ▶ 로그로 재연결)'}
+          </p>
           <MqLogPanel height={260} onConnected={() => setError('')} />
         </div>
       )}
