@@ -59,10 +59,15 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   useEffect(() => {
     reloadFlows()
     api.listEnvironments().then(setEnvs).catch(() => {})
+    // 앱 시작 시 저장된 환경 선택이 있으면 자동 연결해 연결/바인딩 정보를 바로 보여준다.
+    if (envId != null && mqSession.getEnvId() !== envId) {
+      mqSession.start(envId).catch(e => setError('MQ 연결 실패: ' + String(e)))
+    }
     const h = () => reloadFlows() // 레코더에서 DB 저장 시 자동 갱신
     window.addEventListener('ui-flows-changed', h)
     return () => { window.removeEventListener('ui-flows-changed', h) }
     // MQ 세션은 전역 유지(탭 전환에도 로그·연결 보존) — 언마운트에서 끊지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const finishItem = (i: number, status: 'passed' | 'failed', detail: string) => {

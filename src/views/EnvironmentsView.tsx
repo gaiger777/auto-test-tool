@@ -34,7 +34,14 @@ export default function EnvironmentsView() {
     (vals.length ? vals : ['']).map(v => ({ id: nextId.current++, v }))
 
   const reload = () => api.listEnvironments().then(setEnvs).catch(e => setError(String(e)))
-  useEffect(() => { reload() }, [])
+  useEffect(() => {
+    reload()
+    // 화면 진입 시 저장된 로그 대상이 있고 아직 그 환경에 연결돼 있지 않으면 자동 연결.
+    if (logEnvId != null && mqSession.getEnvId() !== logEnvId) {
+      mqSession.start(logEnvId).catch(e => setError('RabbitMQ 연결 실패: ' + String(e)))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const edit = (env: Environment) => {
     setForm(env)
