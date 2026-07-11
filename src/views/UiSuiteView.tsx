@@ -285,7 +285,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
         </div>
       </div>
 
-      {envId != null && <MqLogPanel />}
+      {envId != null && <MqLogPanel onConnected={() => setError('')} />}
 
       {modalCalls && <ApiCallsModal title={modalCalls.title} calls={modalCalls.calls} onClose={() => setModalCalls(null)} />}
     </div>

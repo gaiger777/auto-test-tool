@@ -134,7 +134,7 @@ export default function EnvironmentsView() {
       {logEnvId != null && (
         <div style={{ marginTop: 12 }}>
           <p className="dim">"{envs.find(e => e.id === logEnvId)?.name}" 환경의 RabbitMQ 실시간 로그</p>
-          <MqLogPanel height={260} />
+          <MqLogPanel height={260} onConnected={() => setError('')} />
         </div>
       )}
     </div>
