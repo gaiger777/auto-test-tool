@@ -1,35 +1,26 @@
-import { useEffect, useRef, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
-
-interface MqLog { event_type: string; text: string }
-interface LogRow { ts: string; event_type: string; text: string }
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { mqLog, type LogRow } from '../mqLog'
 
 const pretty = (t: string) => { try { return JSON.stringify(JSON.parse(t), null, 2) } catch { return t } }
 
-// 하단 고정 RabbitMQ 로그 패널. 'mq-log' 이벤트를 수신해 누적 표시하고, 행 클릭 시 JSON 상세를 연다.
-// onConnected: '(연결)' 안내가 오면 호출(상위에서 실패 경고를 지우는 용도).
+// 하단 고정 RabbitMQ 로그 패널. 전역 스토어(mqLog)에서 읽어 탭 전환에도 유지된다.
+// 행 클릭 시 JSON 상세 모달. onConnected: '(연결)' 안내가 오면 호출(상위 실패 경고 제거).
 export default function MqLogPanel({ height = 200, onConnected }: { height?: number; onConnected?: () => void }) {
-  const [rows, setRows] = useState<LogRow[]>([])
+  const { rows, connectSeq } = useSyncExternalStore(mqLog.subscribe, mqLog.getSnapshot)
   const [detail, setDetail] = useState<LogRow | null>(null)
   const [exclude, setExclude] = useState(() => localStorage.getItem('mqlog.exclude') ?? '')
   const boxRef = useRef<HTMLDivElement>(null)
-  const onConnRef = useRef(onConnected)
-  useEffect(() => { onConnRef.current = onConnected }, [onConnected])
+
+  // 연결 성공 시 상위 경고 제거 (마운트 이후 새 연결에만 반응)
+  const seqRef = useRef(connectSeq)
+  useEffect(() => {
+    if (connectSeq !== seqRef.current) { seqRef.current = connectSeq; onConnected?.() }
+  }, [connectSeq, onConnected])
 
   const changeExclude = (v: string) => { setExclude(v); localStorage.setItem('mqlog.exclude', v) }
-  // 쉼표로 구분된 제외어. event_type 에 하나라도 포함되면 숨긴다.('(연결)' 등 안내는 항상 표시)
   const excludeTerms = exclude.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
   const isInfo = (et: string) => et.startsWith('(')
   const visible = rows.filter(r => isInfo(r.event_type) || !excludeTerms.some(t => r.event_type.toLowerCase().includes(t)))
-
-  useEffect(() => {
-    const un = listen<MqLog>('mq-log', e => {
-      const ts = new Date().toLocaleTimeString()
-      if (e.payload.event_type === '(연결)') onConnRef.current?.()
-      setRows(prev => [...prev.slice(-300), { ts, event_type: e.payload.event_type, text: e.payload.text }])
-    })
-    return () => { un.then(u => u()) }
-  }, [])
 
   useEffect(() => {
     const el = boxRef.current
@@ -40,7 +31,7 @@ export default function MqLogPanel({ height = 200, onConnected }: { height?: num
     <div style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 13 }}>RabbitMQ 로그 ({visible.length}/{rows.length})</strong>
-        <button onClick={() => setRows([])} disabled={!rows.length}>지우기</button>
+        <button onClick={() => mqLog.clear()} disabled={!rows.length}>지우기</button>
         <input value={exclude} onChange={e => changeExclude(e.target.value)}
           placeholder="제외할 event_type (쉼표, 예: identity.authenticate)" style={{ minWidth: 300, fontSize: 12 }} />
         <span className="dim" style={{ fontSize: 11 }}>행 클릭 = JSON 상세</span>

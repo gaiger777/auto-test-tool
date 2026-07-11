@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as api from '../api'
 import MqLogPanel from '../components/MqLogPanel'
+import { mqSession } from '../mqLog'
 import type { Environment } from '../types'
 
 // RabbitMQ 설정만 사용하는 간소화된 환경. (Keystone/엔드포인트 등은 빈 값으로 저장)
@@ -19,16 +20,14 @@ export default function EnvironmentsView() {
   const [hosts, setHosts] = useState<HostRow[]>([{ id: 0, v: '' }])
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
-  const [logEnvId, setLogEnvId] = useState<number | null>(null)
+  // 로그 세션은 전역(mqSession) — 탭을 벗어나도 유지된다.
+  const logEnvId = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
   const nextId = useRef(1)
   const mkRows = (vals: string[]): HostRow[] =>
     (vals.length ? vals : ['']).map(v => ({ id: nextId.current++, v }))
 
   const reload = () => api.listEnvironments().then(setEnvs).catch(e => setError(String(e)))
-  useEffect(() => {
-    reload()
-    return () => { api.stopReplayMq().catch(() => {}) }
-  }, [])
+  useEffect(() => { reload() }, [])
 
   const edit = (env: Environment) => {
     setForm(env)
@@ -66,10 +65,10 @@ export default function EnvironmentsView() {
 
   const startLog = async (env: Environment) => {
     setError('')
-    try { await api.startReplayMq(env.id!); setLogEnvId(env.id!) }
+    try { await mqSession.start(env.id!) }
     catch (e) { setError('RabbitMQ 연결 실패: ' + String(e)) }
   }
-  const stopLog = async () => { try { await api.stopReplayMq() } catch { /* noop */ } setLogEnvId(null) }
+  const stopLog = async () => { await mqSession.stop() }
 
   return (
     <div>

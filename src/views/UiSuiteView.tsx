@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { runDelegatedStep } from '../replayDelegate'
 import { kindLabel, stepSummary } from '../uiStep'
+import { mqSession } from '../mqLog'
 import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import FlowTree from '../components/FlowTree'
 import MqLogPanel from '../components/MqLogPanel'
@@ -32,8 +33,8 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   const [loadedLabel, setLoadedLabel] = useState('')
   const [items, setItems] = useState<SuiteItem[]>([])
   const [envs, setEnvs] = useState<Environment[]>([])
-  const [envId, setEnvId] = useState<number | null>(null)
-  const [mqOn, setMqOn] = useState(false)
+  // 환경(MQ 세션)은 전역 mqSession — 탭 전환에도 유지, 환경 화면과 공유.
+  const envId = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
   const [runningAll, setRunningAll] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
@@ -53,10 +54,8 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     api.listEnvironments().then(setEnvs).catch(() => {})
     const h = () => reloadFlows() // 레코더에서 DB 저장 시 자동 갱신
     window.addEventListener('ui-flows-changed', h)
-    return () => {
-      window.removeEventListener('ui-flows-changed', h)
-      api.stopReplayMq().catch(() => {}) // 화면 벗어나면 MQ 로그 세션 정리
-    }
+    return () => { window.removeEventListener('ui-flows-changed', h) }
+    // MQ 세션은 전역 유지(탭 전환에도 로그·연결 보존) — 언마운트에서 끊지 않는다.
   }, [])
 
   const finishItem = (i: number, status: 'passed' | 'failed', detail: string) => {
@@ -110,11 +109,11 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   }
 
   const changeEnv = async (v: number | null) => {
-    setEnvId(v); setError('')
+    setError('')
     try {
-      if (v != null) { await api.startReplayMq(v); setMqOn(true) }
-      else { await api.stopReplayMq(); setMqOn(false) }
-    } catch (e) { setMqOn(false); setError('MQ 연결 실패: ' + String(e)) }
+      if (v != null) await mqSession.start(v)
+      else await mqSession.stop()
+    } catch (e) { setError('MQ 연결 실패: ' + String(e)) }
   }
 
   const move = (i: number, d: -1 | 1) => {
@@ -156,8 +155,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     const needsMq = idxs.some(i => itemsRef.current[i]?.actions.some(a => a.kind === 'wait_event'))
     if (!needsMq) return true
     if (envId == null) { setError('wait_event 스텝이 있어 환경(MQ) 선택이 필요합니다'); return false }
-    if (!mqOn) { try { await api.startReplayMq(envId); setMqOn(true) } catch (e) { setError('MQ 연결 실패: ' + String(e)); return false } }
-    return true
+    return true // 환경 선택 시 이미 mqSession.start 로 연결됨
   }
 
   const runAll = async () => {
@@ -200,7 +198,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
           <option value="">환경 없음</option>
           {envs.map(en => <option key={en.id} value={en.id!}>{en.name}</option>)}
         </select>
-        {mqOn && <span className="dim">RabbitMQ 연결됨</span>}
+        {envId != null && <span className="dim">RabbitMQ 연결됨</span>}
         <span style={{ flex: 1 }} />
         <button onClick={reloadFlows} disabled={busy}>트리 새로고침</button>
         <button onClick={doExport} disabled={busy}>DB 내보내기</button>
