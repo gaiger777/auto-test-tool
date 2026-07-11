@@ -143,7 +143,7 @@ export default function EnvironmentsView() {
             "{envs.find(e => e.id === logEnvId)?.name}" 환경의 RabbitMQ 실시간 로그
             {connectedEnv === logEnvId ? '' : ' · (다른 환경이 연결 중이거나 끊김 — ▶ 로그로 재연결)'}
           </p>
-          <MqLogPanel height={260} onConnected={() => setError('')} />
+          <MqLogPanel height={260} storageKey="env" onConnected={() => setError('')} />
         </div>
       )}
     </div>

@@ -3,12 +3,15 @@ import { mqLog, type LogRow } from '../mqLog'
 
 const pretty = (t: string) => { try { return JSON.stringify(JSON.parse(t), null, 2) } catch { return t } }
 
-// 하단 고정 RabbitMQ 로그 패널. 전역 스토어(mqLog)에서 읽어 탭 전환에도 유지된다.
+// 하단 고정 RabbitMQ 로그 패널. 로그 rows는 전역 스토어(단일 연결)에서 공유하지만,
+// 제외 필터는 storageKey별로 화면마다 독립 저장한다.
 // 행 클릭 시 JSON 상세 모달. onConnected: '(연결)' 안내가 오면 호출(상위 실패 경고 제거).
-export default function MqLogPanel({ height = 200, onConnected }: { height?: number; onConnected?: () => void }) {
+export default function MqLogPanel({ height = 200, onConnected, storageKey = 'default' }:
+  { height?: number; onConnected?: () => void; storageKey?: string }) {
   const { rows, connectSeq } = useSyncExternalStore(mqLog.subscribe, mqLog.getSnapshot)
   const [detail, setDetail] = useState<LogRow | null>(null)
-  const [exclude, setExclude] = useState(() => localStorage.getItem('mqlog.exclude') ?? '')
+  const exKey = `mqlog.exclude.${storageKey}`
+  const [exclude, setExclude] = useState(() => localStorage.getItem(exKey) ?? '')
   const boxRef = useRef<HTMLDivElement>(null)
 
   // 연결 성공 시 상위 경고 제거 (마운트 이후 새 연결에만 반응)
@@ -17,7 +20,7 @@ export default function MqLogPanel({ height = 200, onConnected }: { height?: num
     if (connectSeq !== seqRef.current) { seqRef.current = connectSeq; onConnected?.() }
   }, [connectSeq, onConnected])
 
-  const changeExclude = (v: string) => { setExclude(v); localStorage.setItem('mqlog.exclude', v) }
+  const changeExclude = (v: string) => { setExclude(v); localStorage.setItem(exKey, v) }
   const excludeTerms = exclude.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
   const isInfo = (et: string) => et.startsWith('(')
   const visible = rows.filter(r => isInfo(r.event_type) || !excludeTerms.some(t => r.event_type.toLowerCase().includes(t)))
