@@ -14,9 +14,8 @@ interface Props {
   onRenameGroup?: (siteUrl: string, oldGroup: string, newGroup: string) => void
 }
 
-// URL → 그룹 → 시나리오 트리. 리프 클릭은 onPickFlow, URL/그룹의 ▶ 는 onPickMany, ✎ 는 이름 변경.
+// URL → 그룹 → 시나리오 트리. 리프 클릭은 onPickFlow, URL/그룹의 ▶ 는 onPickMany, ✎ 는 인라인 이름 변경.
 export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup }: Props) {
-  // 그룹은 raw grp('' = 기본)로 키를 잡는다 → 이름 변경 시 실제 저장값을 넘길 수 있다.
   const tree = useMemo(() => {
     const bySite = new Map<string, Map<string, UiFlowRecord[]>>()
     for (const f of flows) {
@@ -32,22 +31,28 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const toggle = (k: string) => setCollapsed(c => ({ ...c, [k]: !c[k] }))
 
-  const renameGroup = (site: string, rawGrp: string) => {
-    if (!onRenameGroup) return
-    const next = window.prompt('그룹명 변경', grpLabel(rawGrp))
-    if (next == null) return
-    const v = next.trim()
-    if (!v || v === grpLabel(rawGrp)) return
-    onRenameGroup(site, rawGrp, v)
+  // 인라인 편집: window.prompt 는 WKWebView 에서 막혀 있어 입력창을 직접 렌더한다.
+  const [editKey, setEditKey] = useState<string | null>(null)
+  const [editVal, setEditVal] = useState('')
+  const beginEdit = (key: string, current: string) => { setEditKey(key); setEditVal(current) }
+  const cancelEdit = () => { setEditKey(null); setEditVal('') }
+
+  const commitFlow = (f: UiFlowRecord) => {
+    const v = editVal.trim()
+    cancelEdit()
+    if (v && v !== f.name) onRenameFlow?.(f, v)
   }
-  const renameFlow = (f: UiFlowRecord) => {
-    if (!onRenameFlow) return
-    const next = window.prompt('시나리오 이름 변경', f.name)
-    if (next == null) return
-    const v = next.trim()
-    if (!v || v === f.name) return
-    onRenameFlow(f, v)
+  const commitGroup = (site: string, rawGrp: string) => {
+    const v = editVal.trim()
+    cancelEdit()
+    if (v && v !== grpLabel(rawGrp)) onRenameGroup?.(site, rawGrp, v)
   }
+
+  const editInput = (onCommit: () => void) => (
+    <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
+      onKeyDown={e => { if (e.key === 'Enter') onCommit(); else if (e.key === 'Escape') cancelEdit() }}
+      onBlur={onCommit} style={{ flex: 1, fontSize: 13 }} />
+  )
 
   if (flows.length === 0) return <p className="dim" style={{ fontSize: 12 }}>저장된 시나리오가 없습니다.</p>
 
@@ -68,28 +73,37 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
             {siteOpen && [...groups.entries()].map(([rawGrp, list]) => {
               const grpKey = 'g:' + site + '::' + rawGrp
               const grpOpen = !collapsed[grpKey]
+              const editing = editKey === grpKey
               return (
                 <div key={rawGrp} style={{ marginLeft: 16 }}>
                   <div className="tree-row" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
                     <button onClick={() => toggle(grpKey)} style={{ padding: '0 4px' }}>{grpOpen ? '▾' : '▸'}</button>
                     <span className="codicon codicon-folder" aria-hidden="true" />
-                    <span style={{ flex: 1 }}>{grpLabel(rawGrp)} <span className="dim">({list.length})</span></span>
-                    {onRenameGroup && <button onClick={() => renameGroup(site, rawGrp)} title="그룹명 변경">✎</button>}
-                    {onPickMany && <button onClick={() => onPickMany(list, grpLabel(rawGrp))} title="이 그룹 불러오기">▶</button>}
+                    {editing
+                      ? editInput(() => commitGroup(site, rawGrp))
+                      : <span style={{ flex: 1 }}>{grpLabel(rawGrp)} <span className="dim">({list.length})</span></span>}
+                    {onRenameGroup && !editing && <button onClick={() => beginEdit(grpKey, grpLabel(rawGrp))} title="그룹명 변경">✎</button>}
+                    {onPickMany && !editing && <button onClick={() => onPickMany(list, grpLabel(rawGrp))} title="이 그룹 불러오기">▶</button>}
                   </div>
-                  {grpOpen && list.map(f => (
-                    <div key={f.id} className="tree-row" style={{ marginLeft: 20, display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
-                      <span className="codicon codicon-file" aria-hidden="true" />
-                      <span
-                        onClick={() => onPickFlow?.(f)}
-                        style={{ cursor: onPickFlow ? 'pointer' : 'default', flex: 1, fontWeight: selectedId === f.id ? 700 : 400,
-                          color: selectedId === f.id ? 'var(--vsc-accent, #4daafc)' : undefined }}
-                        title={f.name}>
-                        {f.name}
-                      </span>
-                      {onRenameFlow && <button onClick={() => renameFlow(f)} title="이름 변경">✎</button>}
-                    </div>
-                  ))}
+                  {grpOpen && list.map(f => {
+                    const fKey = 'f:' + f.id
+                    const fe = editKey === fKey
+                    return (
+                      <div key={f.id} className="tree-row" style={{ marginLeft: 20, display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
+                        <span className="codicon codicon-file" aria-hidden="true" />
+                        {fe
+                          ? editInput(() => commitFlow(f))
+                          : <span
+                              onClick={() => onPickFlow?.(f)}
+                              style={{ cursor: onPickFlow ? 'pointer' : 'default', flex: 1, fontWeight: selectedId === f.id ? 700 : 400,
+                                color: selectedId === f.id ? 'var(--vsc-accent, #4daafc)' : undefined }}
+                              title={f.name}>
+                              {f.name}
+                            </span>}
+                        {onRenameFlow && !fe && <button onClick={() => beginEdit(fKey, f.name)} title="이름 변경">✎</button>}
+                      </div>
+                    )
+                  })}
                 </div>
               )
             })}

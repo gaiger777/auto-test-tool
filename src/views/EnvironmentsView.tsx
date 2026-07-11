@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
 import MqLogPanel from '../components/MqLogPanel'
 import type { Environment } from '../types'
@@ -10,15 +10,19 @@ const empty: Environment = {
   endpoints: {}, mq_hosts: '', mq_user: 'openstack', mq_password: '', mq_vhost: '/',
 }
 
+interface HostRow { id: number; v: string }
 const hostsToList = (s: string) => (s ? s.split(',').map(h => h.trim()).filter(Boolean) : [])
 
 export default function EnvironmentsView() {
   const [envs, setEnvs] = useState<Environment[]>([])
   const [form, setForm] = useState<Environment>(empty)
-  const [hosts, setHosts] = useState<string[]>([''])
+  const [hosts, setHosts] = useState<HostRow[]>([{ id: 0, v: '' }])
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
   const [logEnvId, setLogEnvId] = useState<number | null>(null)
+  const nextId = useRef(1)
+  const mkRows = (vals: string[]): HostRow[] =>
+    (vals.length ? vals : ['']).map(v => ({ id: nextId.current++, v }))
 
   const reload = () => api.listEnvironments().then(setEnvs).catch(e => setError(String(e)))
   useEffect(() => {
@@ -29,18 +33,18 @@ export default function EnvironmentsView() {
   const edit = (env: Environment) => {
     setForm(env)
     const list = hostsToList(env.mq_hosts)
-    setHosts(list.length ? list : (env.mq_url ? [env.mq_url] : ['']))
+    setHosts(mkRows(list.length ? list : (env.mq_url ? [env.mq_url] : [''])))
   }
-  const reset = () => { setForm(empty); setHosts(['']) }
+  const reset = () => { setForm(empty); setHosts(mkRows([''])) }
 
-  const setHost = (i: number, v: string) => setHosts(h => h.map((x, j) => (j === i ? v : x)))
-  const addHost = () => setHosts(h => [...h, ''])
-  const delHost = (i: number) => setHosts(h => (h.length > 1 ? h.filter((_, j) => j !== i) : h))
+  const setHost = (id: number, v: string) => setHosts(rows => rows.map(r => (r.id === id ? { ...r, v } : r)))
+  const addHost = () => setHosts(rows => [...rows, { id: nextId.current++, v: '' }])
+  const delHost = (id: number) => setHosts(rows => (rows.length > 1 ? rows.filter(r => r.id !== id) : rows))
 
   const save = async () => {
     setError('')
     if (!form.name.trim()) { setError('이름을 입력하세요'); return }
-    const cleanHosts = hosts.map(h => h.trim()).filter(Boolean)
+    const cleanHosts = hosts.map(r => r.v.trim()).filter(Boolean)
     if (cleanHosts.length === 0) { setError('RabbitMQ 호스트(host:port)를 1개 이상 입력하세요'); return }
     try {
       await api.saveEnvironment({ ...form, mq_hosts: cleanHosts.join(','), mq_url: '' }, null)
@@ -74,6 +78,7 @@ export default function EnvironmentsView() {
       <div className="two-col">
         <div>
           <h3>환경 목록</h3>
+          {envs.length === 0 && <p className="dim" style={{ fontSize: 12 }}>저장된 환경이 없습니다.</p>}
           <ul className="list">
             {envs.map(env => (
               <li key={env.id}>
@@ -92,14 +97,16 @@ export default function EnvironmentsView() {
             <input value={form.name} placeholder="dev" onChange={e => setForm({ ...form, name: e.target.value })} />
           </label>
 
-          <label className="field">RabbitMQ URL (host:port) *</label>
-          {hosts.map((h, i) => (
-            <div className="add-row" key={i} style={{ marginBottom: 4 }}>
-              <input value={h} placeholder="10.255.40.2:5672" onChange={e => setHost(i, e.target.value)} style={{ minWidth: 260 }} />
-              <button className="danger" onClick={() => delHost(i)} disabled={hosts.length === 1} title="삭제">🗑</button>
-            </div>
-          ))}
-          <button onClick={addHost} style={{ marginBottom: 8 }}>+ 필드 추가</button>
+          <div className="field">RabbitMQ 호스트 (host:port) *
+            {hosts.map((r, i) => (
+              <div className="add-row" key={r.id} style={{ marginTop: 4 }}>
+                <span className="dim" style={{ width: 16 }}>{i + 1}</span>
+                <input value={r.v} placeholder="host:port" onChange={e => setHost(r.id, e.target.value)} style={{ minWidth: 240 }} />
+                <button className="danger" onClick={() => delHost(r.id)} disabled={hosts.length === 1} title="이 호스트 삭제">🗑</button>
+              </div>
+            ))}
+            <button onClick={addHost} style={{ marginTop: 4 }}>+ 필드 추가</button>
+          </div>
 
           <label className="field">인증 아이디
             <input value={form.mq_user} placeholder="openstack" onChange={e => setForm({ ...form, mq_user: e.target.value })} />
