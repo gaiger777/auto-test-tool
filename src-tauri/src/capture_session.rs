@@ -146,7 +146,15 @@ pub fn recorder_script(token: &str) -> String {
     var isRadio = el.tagName === "INPUT" && (el.type === "radio" || el.type === "checkbox");
     // 라디오/체크박스의 name은 그룹 공용(유일하지 않음) → name 셀렉터 제외.
     if (el.getAttribute("name") && !isRadio) out.push({{ strategy: "name", value: el.tagName.toLowerCase() + "[name=" + el.getAttribute("name") + "]" }});
-    if (role && nm) out.push({{ strategy: "role", value: role + "|" + nm }});
+    if (role && nm) {{
+      // 같은 role|name 요소가 여러 개면(예: 표가 여러 개인 화면의 페이지네이션 화살표) 순서(index)로 구분.
+      var rc = document.querySelectorAll("a,button,input,select,textarea,[role]");
+      var matches = [];
+      for (var mi = 0; mi < rc.length; mi++) {{ if (roleOf(rc[mi]) === role && nameOf(rc[mi]) === nm) matches.push(rc[mi]); }}
+      var ridx = matches.indexOf(el);
+      if (matches.length > 1 && ridx >= 0) out.push({{ strategy: "roleidx", value: role + "|" + nm + "|||" + ridx }});
+      out.push({{ strategy: "role", value: role + "|" + nm }});
+    }}
     if (nm && (role === "button" || role === "link")) out.push({{ strategy: "text", value: nm }});
     // 테이블 행 안의 요소는 위치(nth-of-type)가 아니라 '행 텍스트(가장 긴 셀 = 대개 이름)'로 앵커링
     // → 정렬·페이징으로 행 위치가 바뀌어도 올바른 행을 찾는다. (css 위치 셀렉터보다 우선)
@@ -291,6 +299,11 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       if(sel.strategy==="role"){ var p=sel.value.split("|"); var role=p[0], nm=(p.slice(1).join("|"));
         var all=document.querySelectorAll('a,button,input,select,textarea,[role]');
         for(var i=0;i<all.length;i++){ if(roleOf(all[i])===role && nameOf(all[i])===nm) return all[i]; } return null; }
+      if(sel.strategy==="roleidx"){ // "role|name|||index" → 같은 role|name 중 index번째 (표가 여러 개인 페이지네이션 구분)
+        var rp=sel.value.split("|||"); var rn=rp[0].split("|"); var rrole=rn[0], rnm=(rn.slice(1).join("|")); var ridx=parseInt(rp[1]||"0",10);
+        var ra=document.querySelectorAll('a,button,input,select,textarea,[role]'); var ms=[];
+        for(var ri=0;ri<ra.length;ri++){ if(roleOf(ra[ri])===rrole && nameOf(ra[ri])===rnm) ms.push(ra[ri]); }
+        return ms[ridx] || ms[0] || null; }
       if(sel.strategy==="text"){ var els=document.querySelectorAll('a,button,[role=button],summary,label');
         for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
       if(sel.strategy==="rowtext"){ // "행앵커텍스트|||힌트" → 그 텍스트를 포함하는 행 안에서 타겟을 찾는다
