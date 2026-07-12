@@ -335,7 +335,14 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(li.className && (""+li.className).indexOf("disabled")>=0) return true; return false; }
   function pagBtn(tbl, kind){ var scope=tableScope(tbl);
     var li=scope.querySelector(kind==="next"?".ant-pagination-next":".ant-pagination-prev"); if(li){ return li.querySelector("button")||li; }
-    return findPagBtnIn(scope, kind==="next"?PAG_NEXT:PAG_PREV); }
+    // 후보(같은 이름 아이콘)를 모두 모아, 표 바로 아래에서 가장 가까운 것을 고른다(다중 표 구분).
+    var glyph = kind==="next"?PAG_NEXT:PAG_PREV; var cands=[]; var bs=scope.querySelectorAll("button,[role=button],a,li,span,i");
+    for(var i=0;i<bs.length;i++){ var nm=(nameOf(bs[i])||"").toLowerCase().trim();
+      for(var g=0;g<glyph.length;g++){ if(nm===glyph[g]||nm.indexOf(glyph[g])>=0){ var b=bs[i].closest("button,[role=button],a,li")||bs[i]; if(cands.indexOf(b)<0) cands.push(b); break; } } }
+    if(!cands.length) return null;
+    var tr=tbl.getBoundingClientRect(); var best=null, bd=1e9;
+    for(var c=0;c<cands.length;c++){ var r=cands[c].getBoundingClientRect(); if(r.top<tr.top-5) continue; var d=r.top-tr.bottom; if(d<0) d=Math.abs(d); if(d<bd){ bd=d; best=cands[c]; } }
+    return best || cands[0]; }
   function rowInScope(root, atext){ var rows=(root||document).querySelectorAll("tr,[role=row]"); for(var i=0;i<rows.length;i++){ if((rows[i].textContent||"").replace(/\s+/g," ").indexOf(atext)>=0) return rows[i]; } return null; }
   function firstRowText(tbl){ if(!tbl) return ""; var r=tbl.querySelector("tbody tr, tr"); return r?((r.textContent||"").replace(/\s+/g," ").slice(0,60)):""; }
   // rowtext 대상 행이 현재 페이지에 없으면, 그 표를 1페이지부터 넘겨가며 찾는다(데이터 이동/페이지 변화 대응).
