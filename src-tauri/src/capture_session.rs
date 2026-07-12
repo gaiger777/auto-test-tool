@@ -375,8 +375,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     runFrom(nextIdx);
   };
   async function runFrom(start){
-    // href 폴백 네비게이션을 넘어서도 실패 누적이 유지되도록 sessionStorage에 보관.
+    // href 폴백 네비게이션을 넘어서도 실패/경고 누적이 유지되도록 sessionStorage에 보관.
     var anyFail = sessionStorage.getItem("__replay_fail")==="1";
+    var apiWarn = sessionStorage.getItem("__replay_apiwarn")==="1";
     for(var i=start;i<ACTIONS.length;i++){
       var a=ACTIONS[i];
       var netStart=Date.now();
@@ -427,15 +428,16 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       var calls=(window.__net||[]).filter(function(c){ return c.ts>=netStart; });
       var errs=calls.filter(function(c){ return c.status>=400 && c.status!==401; });
       if(errs.length){
-        anyFail=true; sessionStorage.setItem("__replay_fail","1");
+        // 동작 자체는 성공 — API 오류는 실패로 보지 않고 경고(⚠)로만 표시한다.
+        apiWarn=true; sessionStorage.setItem("__replay_apiwarn","1");
         var d=errs.slice(0,3).map(function(c){ return c.method+" "+shortPath(c.url)+" → "+c.status; }).join(", ");
-        stepReport(i, "failed", base+" · API오류 "+errs.length+"건: "+d);
+        stepReport(i, "passed", base+" · ⚠ API오류 "+errs.length+"건: "+d);
       } else {
         stepReport(i, "passed", base+" · API "+calls.length+"건");
       }
     }
     stopHover();
-    finish(anyFail?"failed":"passed", anyFail?"완료(일부 API 오류)":"재생 완료");
+    finish(anyFail?"failed":"passed", anyFail?"완료(일부 스텝 실패)":(apiWarn?"재생 완료(API 경고 있음)":"재생 완료"));
   }
   // 전체 실행 연속 진행: 창을 닫지 않고 다음 시나리오 액션을 이 창에서 이어서 실행한다.
   // 현재 시나리오 액션을 sessionStorage에 두어 네비게이션(하드 리로드)에도 유지한다.
@@ -443,14 +445,14 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     try{ ACTIONS = JSON.parse(actionsJson); }catch(e){ return; }
     sessionStorage.setItem("__replay_actions", actionsJson);
     sessionStorage.setItem("__replay_idx", "0");
-    sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_done"); sessionStorage.setItem("__replay_reported", "-1");
+    sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_apiwarn"); sessionStorage.removeItem("__replay_done"); sessionStorage.setItem("__replay_reported", "-1");
     runFrom(0);
   };
   function boot(){
     var fresh = sessionStorage.getItem("__replay_runid") !== TOKEN;
     if(fresh){ sessionStorage.setItem("__replay_runid", TOKEN); sessionStorage.setItem("__replay_idx", "0");
       sessionStorage.setItem("__replay_actions", JSON.stringify(ACTIONS)); // 초기 시나리오 시드
-      sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_done"); sessionStorage.setItem("__replay_reported", "-1"); }
+      sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_apiwarn"); sessionStorage.removeItem("__replay_done"); sessionStorage.setItem("__replay_reported", "-1"); }
     // 이어받기(연속 실행/네비게이션 재개) 시 현재 시나리오 액션을 sessionStorage에서 복원.
     try{ var stored = sessionStorage.getItem("__replay_actions"); if(stored) ACTIONS = JSON.parse(stored); }catch(e){}
     var idx = parseInt(sessionStorage.getItem("__replay_idx")||"0", 10);
@@ -464,7 +466,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       // 마지막 스텝의 하드 네비게이션으로 최종 완료 보고가 유실됐다면 여기서 마무리한다.
       if(sessionStorage.getItem("__replay_done")!=="1"){
         var anyFail = sessionStorage.getItem("__replay_fail")==="1";
-        finish(anyFail?"failed":"passed", anyFail?"완료(일부 API 오류)":"재생 완료");
+        var apiWarn = sessionStorage.getItem("__replay_apiwarn")==="1";
+        finish(anyFail?"failed":"passed", anyFail?"완료(일부 스텝 실패)":(apiWarn?"재생 완료(API 경고 있음)":"재생 완료"));
       }
       return;
     }
