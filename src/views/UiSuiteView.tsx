@@ -32,7 +32,6 @@ const toItem = (f: UiFlowRecord): SuiteItem => ({
 
 export default function UiSuiteView({ active }: { active?: boolean }) {
   const [allFlows, setAllFlows] = useState<UiFlowRecord[]>([])
-  const [loadedLabel, setLoadedLabel] = useState('')
   const [items, setItems] = useState<SuiteItem[]>([])
   const [envs, setEnvs] = useState<Environment[]>([])
   // 이 화면의 환경 선택(화면별 독립, localStorage로 지속). MQ 연결 자체는 mqSession(공유).
@@ -47,6 +46,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   const [runningAll, setRunningAll] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
+  const [saveGroup, setSaveGroup] = useState('')
   const [modalCalls, setModalCalls] = useState<{ title: string; calls: CallLike[] } | null>(null)
 
   const itemsRef = useRef<SuiteItem[]>([])
@@ -116,8 +116,44 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const pickFlow = (f: UiFlowRecord) => { setItems([toItem(f)]); setLoadedLabel(f.name); setError('') }
-  const pickMany = (flows: UiFlowRecord[], label: string) => { setItems(flows.map(toItem)); setLoadedLabel(label); setError('') }
+  // 트리에서 고른 시나리오를 현재 목록에 누적한다.
+  // 같은 URL만 허용(첫 시나리오가 URL을 잠금), 중복 id는 제외.
+  const addFlows = (flows: UiFlowRecord[]) => {
+    setError(''); setInfo('')
+    const picked = flows.filter(Boolean)
+    if (!picked.length) return
+    const cur = itemsRef.current
+    const site = cur[0]?.siteUrl ?? picked[0].site_url
+    const ids = new Set(cur.map(x => x.id))
+    const fresh = picked.filter(f => f.site_url === site && !ids.has(f.id!))
+    const skipped = picked.length - fresh.length
+    if (!fresh.length) {
+      setError(cur.length && picked.some(f => f.site_url !== site)
+        ? `현재 URL(${site})과 다른 시나리오는 추가할 수 없습니다`
+        : '추가할 새 시나리오가 없습니다(이미 추가됨)')
+      return
+    }
+    setItems(list => [...list, ...fresh.map(toItem)])
+    setInfo(`${fresh.length}개 추가${skipped ? ` · ${skipped}개 제외(중복/다른 URL)` : ''} · URL: ${site}`)
+  }
+  const pickFlow = (f: UiFlowRecord) => addFlows([f])
+  const pickMany = (flows: UiFlowRecord[]) => addFlows(flows)
+  const clearSuite = () => { setItems([]); setInfo(''); setError('') }
+  // 현재 목록(편집 반영)을 지정한 그룹으로 저장(이동). 이름은 사이트당 유일하므로 grp만 갱신된다.
+  const saveAsGroup = async () => {
+    setError(''); setInfo('')
+    const g = saveGroup.trim()
+    if (!g) { setError('저장할 그룹 이름을 입력하세요'); return }
+    if (!items.length) { setError('저장할 시나리오가 없습니다'); return }
+    if (!window.confirm(`현재 ${items.length}개 시나리오를 '${g}' 그룹으로 저장할까요? (기존 그룹에서 이동)`)) return
+    try {
+      for (const it of items) await api.saveUiFlow(it.name, it.siteUrl, g, it.actions)
+      setItems(list => list.map(x => ({ ...x, grp: g })))
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+      setInfo(`${items.length}개 시나리오를 '${g}' 그룹으로 저장했습니다`)
+    } catch (e) { setError(String(e)) }
+  }
   const renameFlow = async (f: UiFlowRecord, newName: string) => {
     try { await api.renameUiFlow(f.id!, newName); await reloadFlows(); window.dispatchEvent(new CustomEvent('ui-flows-changed')) } catch (e) { setError(String(e)) }
   }
@@ -142,25 +178,13 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     if (j < 0 || j >= items.length) return
     setItems(list => { const n = [...list]; [n[i], n[j]] = [n[j], n[i]]; return n })
   }
-  const remove = async (i: number) => {
-    const it = items[i]
-    if (!window.confirm(`"${it.name}" 시나리오를 DB에서 삭제할까요?`)) return
-    try {
-      await api.deleteUiFlow(it.id)
-      setItems(list => list.filter((_, j) => j !== i))
-      reloadFlows()
-      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
-    } catch (e) { setError(String(e)) }
-  }
+  // 목록에서 빼기(DB 삭제 아님). 실행 세트 구성용 — 원본은 남는다.
+  const removeFromSuite = (i: number) => setItems(list => list.filter((_, j) => j !== i))
   const toggleExpand = (i: number) => setItems(list => list.map((x, j) => (j === i ? { ...x, expanded: !x.expanded } : x)))
 
-  const delAction = async (i: number, k: number) => {
-    const it = itemsRef.current[i]
-    if (!it) return
-    const next = it.actions.filter((_, x) => x !== k)
-    setItems(list => list.map((y, j) => (j === i ? { ...y, actions: next, stepResults: {} } : y)))
-    try { await api.saveUiFlow(it.name, it.siteUrl, it.grp, next) } catch (e) { setError(String(e)) }
-  }
+  // 편집은 메모리에서만 — '새 그룹으로 저장' 시 DB에 반영된다.
+  const delAction = (i: number, k: number) =>
+    setItems(list => list.map((y, j) => (j === i ? { ...y, actions: y.actions.filter((_, x) => x !== k), stepResults: {} } : y)))
 
   const cancelRun = async () => {
     queue.current = []
@@ -239,19 +263,25 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
         {/* 좌측 트리 */}
         <div style={{ borderRight: '1px solid var(--vsc-border)', paddingRight: 12 }}>
           <strong style={{ fontSize: 13 }}>시나리오 트리</strong>
-          <p className="dim" style={{ fontSize: 11, margin: '4px 0' }}>리프 클릭=단일, ▶=그룹/사이트 전체 불러오기</p>
+          <p className="dim" style={{ fontSize: 11, margin: '4px 0' }}>리프 클릭=단일 추가, ▶=그룹/사이트 전체 추가 · 같은 URL만 누적</p>
           <FlowTree flows={allFlows} onPickFlow={pickFlow} onPickMany={pickMany}
             onRenameFlow={renameFlow} onRenameGroup={renameGroup} />
         </div>
 
         {/* 우측 실행 목록 */}
         <div>
-          <div className="add-row">
-            <strong>{loadedLabel ? `불러옴: ${loadedLabel} (${items.length})` : '시나리오를 트리에서 불러오세요'}</strong>
+          <div className="add-row" style={{ flexWrap: 'wrap' }}>
+            <strong>{items.length ? `실행 세트 (${items.length})` : '트리에서 시나리오를 불러오세요'}</strong>
+            {items.length > 0 && <span className="dim" title={items[0].siteUrl} style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>URL: {items[0].siteUrl}</span>}
             <button className="accent" onClick={runAll} disabled={!items.length || busy}>
               {runningAll ? '전체 실행 중…' : '▶ 전체 실행'}
             </button>
             {busy && <button className="danger" onClick={cancelRun}>취소</button>}
+            <span style={{ flex: 1 }} />
+            <input placeholder="새 그룹 이름" value={saveGroup} onChange={e => setSaveGroup(e.target.value)}
+              style={{ width: 130 }} disabled={busy} />
+            <button onClick={saveAsGroup} disabled={!items.length || busy}>새 그룹으로 저장</button>
+            <button className="danger" onClick={clearSuite} disabled={!items.length || busy}>전체 비우기</button>
           </div>
 
           <table className="history">
@@ -272,7 +302,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button onClick={() => move(i, -1)} disabled={i === 0 || busy}>↑</button>
                       <button onClick={() => move(i, 1)} disabled={i === items.length - 1 || busy}>↓</button>
-                      <button className="danger" onClick={() => remove(i)} disabled={busy}>✕</button>
+                      <button className="danger" onClick={() => removeFromSuite(i)} disabled={busy} title="목록에서 빼기(DB 유지)">✕</button>
                     </td>
                   </tr>
                   {it.expanded && (
