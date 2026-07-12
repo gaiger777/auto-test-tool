@@ -482,6 +482,30 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     sessionStorage.setItem("__replay_idx", String(nextIdx));
     runFrom(nextIdx);
   };
+  // ── 세션 유지/재로그인 ──
+  // 로그인 연장 알림 모달이 뜨면 '연장'을 자동 클릭한다(만료 방지). 재생 내내 주기적으로 검사.
+  function clickExtend(){ try{
+    var dlgs=document.querySelectorAll('.ant-modal, .ant-modal-confirm, [role=dialog], [role=alertdialog], .ant-notification-notice');
+    for(var i=0;i<dlgs.length;i++){ var d=dlgs[i]; if(!isVisible(d,false)) continue;
+      var tx=(d.textContent||""); if(!(tx.indexOf("로그인 시간")>=0 || tx.indexOf("만료")>=0 || tx.indexOf("연장")>=0)) continue;
+      var bs=d.querySelectorAll('button,[role=button]');
+      for(var j=0;j<bs.length;j++){ if((bs[j].textContent||"").trim()==="연장"){ bs[j].click(); return; } }
+    }
+  }catch(e){} }
+  if(!window.__extendGuard){ window.__extendGuard=setInterval(clickExtend, 1000); }
+  // 로그인 페이지로 튕겼는지: 보이는 비밀번호 입력이 있거나 URL이 로그인 계열.
+  function onLoginPage(){ try{ var pw=document.querySelector('input[type=password]');
+    if(pw && isVisible(pw,false)) return true; return /login|signin|sign-in|auth/i.test(location.pathname); }catch(e){ return false; } }
+  function loginActions(){ try{ return JSON.parse(sessionStorage.getItem("__login_actions")||"null"); }catch(e){ return null; } }
+  // 액션 목록을 보고 없이 순서대로 수행(재로그인용). 클릭/입력만.
+  async function performActions(list){ if(!list) return;
+    for(var i=0;i<list.length;i++){ var a=list[i];
+      if(a.kind!=="click" && a.kind!=="input" && a.kind!=="hover") continue;
+      var el=await waitActionable(a.selectors, 6000, false);
+      if(!el){ if(a.kind==="click" && a.href){ location.href=a.href; await sleep(1500); await waitNetworkIdle(6000); } continue; }
+      try{ await perform(a, el); await waitNetworkIdle(6000); await sleep(300); }catch(e){}
+    }
+  }
   async function runFrom(start){
     // href 폴백 네비게이션을 넘어서도 실패/경고 누적이 유지되도록 sessionStorage에 보관.
     var anyFail = sessionStorage.getItem("__replay_fail")==="1";
@@ -527,6 +551,19 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
           stepReport(i, "passed", "호버 건너뜀(대상 미발견)");
           sessionStorage.setItem("__replay_idx", String(i+1)); continue;
         }
+        // 세션 만료/중복 로그인으로 로그인 페이지로 튕겼으면: 로그인 스텝을 재수행하고
+        // 현재 시나리오를 처음부터 다시 실행(재로그인 후 네비게이션 복구). '첫 시나리오=로그인' 가정.
+        if((a.kind==="click"||a.kind==="input") && onLoginPage() && loginActions()){
+          var rc=parseInt(sessionStorage.getItem("__relogin_cnt")||"0",10);
+          if(rc<3){
+            sessionStorage.setItem("__relogin_cnt", String(rc+1));
+            stepReport(i, "passed", "세션 끊김 감지 → 재로그인 후 시나리오 재시작");
+            await performActions(loginActions());
+            await sleep(800); await waitNetworkIdle(6000);
+            sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_apiwarn");
+            i=-1; continue; // for 루프가 i++ 하여 0부터 재시작
+          }
+        }
         stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
       }
       // API 검증 기준 시각: 실제 동작 직전(대기 중 배경 폴링 호출은 제외).
@@ -564,12 +601,15 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     sessionStorage.setItem("__replay_actions", actionsJson);
     sessionStorage.setItem("__replay_idx", "0");
     sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_apiwarn"); sessionStorage.removeItem("__replay_done"); sessionStorage.setItem("__replay_reported", "-1");
+    sessionStorage.removeItem("__relogin_cnt"); // 새 시나리오마다 재로그인 시도 횟수 초기화
     runFrom(0);
   };
   function boot(){
     var fresh = sessionStorage.getItem("__replay_runid") !== TOKEN;
     if(fresh){ sessionStorage.setItem("__replay_runid", TOKEN); sessionStorage.setItem("__replay_idx", "0");
       sessionStorage.setItem("__replay_actions", JSON.stringify(ACTIONS)); // 초기 시나리오 시드
+      sessionStorage.setItem("__login_actions", JSON.stringify(ACTIONS)); // 첫 시나리오=로그인 → 재로그인용 보관
+      sessionStorage.removeItem("__relogin_cnt");
       sessionStorage.removeItem("__replay_fail"); sessionStorage.removeItem("__replay_apiwarn"); sessionStorage.removeItem("__replay_done"); sessionStorage.setItem("__replay_reported", "-1"); }
     // 이어받기(연속 실행/네비게이션 재개) 시 현재 시나리오 액션을 sessionStorage에서 복원.
     try{ var stored = sessionStorage.getItem("__replay_actions"); if(stored) ACTIONS = JSON.parse(stored); }catch(e){}
