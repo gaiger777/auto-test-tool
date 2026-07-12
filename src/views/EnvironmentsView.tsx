@@ -70,7 +70,7 @@ export default function EnvironmentsView() {
   }
 
   const remove = (env: Environment) => {
-    if (!window.confirm(`환경 "${env.name}"을(를) 삭제할까요?`)) return
+    if (!window.confirm(`환경 "${env.name}"을(를) 삭제하시겠습니까?`)) return
     api.deleteEnvironment(env.id!)
       .then(() => {
         if (form.id === env.id) reset()

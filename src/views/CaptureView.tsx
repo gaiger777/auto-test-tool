@@ -160,7 +160,7 @@ export default function CaptureView() {
     setError(''); setNotice('')
     const f = allFlows.find(x => x.id === loadedFlowId)
     if (!f) { setError('삭제할 시나리오를 트리에서 먼저 선택하세요'); return }
-    if (!window.confirm(`"${f.name}" 시나리오를 DB에서 삭제할까요?`)) return
+    if (!window.confirm(`"${f.name}" 시나리오를 DB에서 삭제하시겠습니까?`)) return
     try {
       await api.deleteUiFlow(f.id!)
       setLoadedFlowId(null); newScenario()
@@ -192,7 +192,7 @@ export default function CaptureView() {
   const deleteFlows = async (flows: UiFlowRecord[], label: string) => {
     setError('')
     if (!flows.length) return
-    if (!window.confirm(`'${label}' 시나리오 ${flows.length}개를 DB에서 삭제할까요?`)) return
+    if (!window.confirm(`'${label}' 시나리오 ${flows.length}개를 DB에서 삭제하시겠습니까?`)) return
     try {
       for (const f of flows) await api.deleteUiFlow(f.id!)
       if (loadedFlowId != null && flows.some(f => f.id === loadedFlowId)) setLoadedFlowId(null)

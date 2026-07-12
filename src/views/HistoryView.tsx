@@ -34,12 +34,12 @@ export default function HistoryView() {
 
   const removeRun = async (id: number) => {
     setError('')
-    if (!window.confirm(`실행 #${id} 기록을 삭제할까요?`)) return
+    if (!window.confirm(`실행 #${id} 기록을 삭제하시겠습니까?`)) return
     try { await api.deleteUiRun(id); if (selected === id) close(); reload() } catch (e) { setError(String(e)) }
   }
   const clearAll = async () => {
     setError('')
-    if (!window.confirm('모든 실행 히스토리를 삭제할까요?')) return
+    if (!window.confirm('모든 실행 히스토리를 삭제하시겠습니까?')) return
     try { await api.clearUiRuns(); close(); reload() } catch (e) { setError(String(e)) }
   }
   // 스텝 상세 문자열에서 API 성공/실패 판정 (플레이어가 '· API N건' / '· ⚠ API오류 …'로 남김)
