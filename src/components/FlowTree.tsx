@@ -14,7 +14,7 @@ interface Props {
   onRenameGroup?: (siteUrl: string, oldGroup: string, newGroup: string) => void
   onDelete?: (flows: UiFlowRecord[], label: string) => void
   onPickSite?: (siteUrl: string) => void // URL 클릭 시(예: 레코더 대상 URL 채우기)
-  onPickGroup?: (grp: string) => void // 그룹명 클릭 시(예: 레코더 그룹 입력칸 채우기)
+  onPickGroup?: (grp: string, siteUrl: string) => void // 그룹명 클릭 시(그룹+상위 URL 채우기)
 }
 
 // URL → 그룹 → 시나리오 트리. 리프 클릭은 onPickFlow, URL/그룹의 ▶ 는 onPickMany, ✎ 는 인라인 이름 변경.
@@ -87,7 +87,7 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
                     <span className="codicon codicon-folder" aria-hidden="true" />
                     {editing
                       ? editInput(() => commitGroup(site, rawGrp))
-                      : <span onClick={onPickGroup ? () => onPickGroup(grpLabel(rawGrp)) : undefined}
+                      : <span onClick={onPickGroup ? () => onPickGroup(grpLabel(rawGrp), site) : undefined}
                           style={{ flex: 1, cursor: onPickGroup ? 'pointer' : 'default' }}
                           title={onPickGroup ? '클릭: 이 그룹명을 그룹 입력칸에 넣기' : undefined}>
                           {grpLabel(rawGrp)} <span className="dim">({list.length})</span></span>}

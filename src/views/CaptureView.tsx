@@ -258,7 +258,7 @@ export default function CaptureView() {
           <FlowTree flows={allFlows} selectedId={loadedFlowId} onPickFlow={loadFlow}
             onRenameFlow={renameFlow} onRenameGroup={renameGroup} onDelete={deleteFlows}
             onPickSite={u => { if (!active && !replaying) { setUrl(u); setNotice(`대상 URL 설정: ${u}`) } }}
-            onPickGroup={g => { setGroup(g); setNotice(`그룹 설정: ${g}`) }} />
+            onPickGroup={(g, site) => { setGroup(g); if (!active && !replaying) setUrl(site); setNotice(`그룹 설정: ${g} · URL ${site}`) }} />
           <div className="add-row" style={{ marginTop: 8 }}>
             <button onClick={doImport} disabled={active || replaying}>DB 가져오기</button>
           </div>
