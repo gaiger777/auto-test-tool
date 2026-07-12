@@ -517,6 +517,29 @@ pub fn ui_replay_step(
     Ok(())
 }
 
+/// 전체 실행 연속 진행: 재생 창을 닫지 않고, 기존 창에서 다음 시나리오 액션을 이어서 실행한다.
+#[tauri::command]
+pub fn continue_ui_replay(
+    app: AppHandle,
+    state: State<AppState>,
+    actions: Vec<capture_server::UiAction>,
+) -> Result<(), String> {
+    if state.replay.lock().unwrap().is_none() {
+        return Err("활성 재생 세션이 없습니다".into());
+    }
+    let win = app
+        .webview_windows()
+        .into_iter()
+        .find(|(l, _)| l.starts_with("replay-"))
+        .map(|(_, w)| w)
+        .ok_or("재생 창이 없습니다")?;
+    let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
+    // __replayLoad 에 액션 JSON을 문자열 인자로 전달(이중 인코딩 → JS 문자열 리터럴).
+    let arg = serde_json::to_string(&json).map_err(|e| e.to_string())?;
+    win.eval(&format!("window.__replayLoad && window.__replayLoad({arg})"))
+        .map_err(|e| e.to_string())
+}
+
 /// 진행 중인 UI 재생을 취소한다(재생 창을 닫고 세션 해제).
 #[tauri::command]
 pub fn stop_ui_replay(app: AppHandle, state: State<AppState>) -> Result<(), String> {

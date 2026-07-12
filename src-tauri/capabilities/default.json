@@ -33,6 +33,7 @@
     "allow-export-ui-flows",
     "allow-import-ui-flows",
     "allow-stop-ui-replay",
+    "allow-continue-ui-replay",
     "allow-resume-ui-replay",
     "allow-start-replay-mq",
     "allow-stop-replay-mq",

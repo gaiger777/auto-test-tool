@@ -49,6 +49,7 @@ export const resumeUiReplay = (nextIdx: number, prevStatus: string, prevDetail: 
   invoke<void>('resume_ui_replay', { nextIdx, prevStatus, prevDetail })
 export const startReplayMq = (envId: number, channel: string) => invoke<void>('start_replay_mq', { envId, channel })
 export const stopReplayMq = (channel: string) => invoke<void>('stop_replay_mq', { channel })
+export const continueUiReplay = (actions: UiAction[]) => invoke<void>('continue_ui_replay', { actions })
 export const runWaitEvent = (eventType: string, conditions: Condition[], timeoutSecs: number, channel: string) =>
   invoke<string>('run_wait_event', { eventType, conditions, timeoutSecs, channel })
 

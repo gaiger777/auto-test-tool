@@ -186,6 +186,18 @@ export default function CaptureView() {
       window.dispatchEvent(new CustomEvent('ui-flows-changed'))
     } catch (e) { setError(String(e)) }
   }
+  // 트리에서 URL/그룹/시나리오 삭제(DB). 확인 후 일괄 삭제.
+  const deleteFlows = async (flows: UiFlowRecord[], label: string) => {
+    setError('')
+    if (!flows.length) return
+    if (!window.confirm(`'${label}' 시나리오 ${flows.length}개를 DB에서 삭제할까요?`)) return
+    try {
+      for (const f of flows) await api.deleteUiFlow(f.id!)
+      if (loadedFlowId != null && flows.some(f => f.id === loadedFlowId)) setLoadedFlowId(null)
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+    } catch (e) { setError(String(e)) }
+  }
 
   const loadFlow = (f: UiFlowRecord) => {
     setError(''); setNotice('')
@@ -242,7 +254,7 @@ export default function CaptureView() {
             <button onClick={newScenario}>+ 새 시나리오</button>
           </div>
           <FlowTree flows={allFlows} selectedId={loadedFlowId} onPickFlow={loadFlow}
-            onRenameFlow={renameFlow} onRenameGroup={renameGroup} />
+            onRenameFlow={renameFlow} onRenameGroup={renameGroup} onDelete={deleteFlows} />
           <div className="add-row" style={{ marginTop: 8 }}>
             <button onClick={doImport} disabled={active || replaying}>DB 가져오기</button>
           </div>

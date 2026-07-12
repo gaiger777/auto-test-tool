@@ -12,10 +12,11 @@ interface Props {
   onPickMany?: (flows: UiFlowRecord[], label: string) => void
   onRenameFlow?: (f: UiFlowRecord, newName: string) => void
   onRenameGroup?: (siteUrl: string, oldGroup: string, newGroup: string) => void
+  onDelete?: (flows: UiFlowRecord[], label: string) => void
 }
 
 // URL → 그룹 → 시나리오 트리. 리프 클릭은 onPickFlow, URL/그룹의 ▶ 는 onPickMany, ✎ 는 인라인 이름 변경.
-export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup }: Props) {
+export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup, onDelete }: Props) {
   const tree = useMemo(() => {
     const bySite = new Map<string, Map<string, UiFlowRecord[]>>()
     for (const f of flows) {
@@ -69,6 +70,7 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
               <span className="codicon codicon-globe" aria-hidden="true" />
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site}>{site}</span>
               {onPickMany && <button onClick={() => onPickMany(siteFlows, site)} title="이 사이트 전체 불러오기">▶</button>}
+              {onDelete && <button className="danger" onClick={() => onDelete(siteFlows, site)} title="이 URL 전체 삭제">🗑</button>}
             </div>
             {siteOpen && [...groups.entries()].map(([rawGrp, list]) => {
               const grpKey = 'g:' + site + '::' + rawGrp
@@ -84,6 +86,7 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
                       : <span style={{ flex: 1 }}>{grpLabel(rawGrp)} <span className="dim">({list.length})</span></span>}
                     {onRenameGroup && !editing && <button onClick={() => beginEdit(grpKey, grpLabel(rawGrp))} title="그룹명 변경">✎</button>}
                     {onPickMany && !editing && <button onClick={() => onPickMany(list, grpLabel(rawGrp))} title="이 그룹 불러오기">▶</button>}
+                    {onDelete && !editing && <button className="danger" onClick={() => onDelete(list, '그룹 ' + grpLabel(rawGrp))} title="이 그룹 삭제">🗑</button>}
                   </div>
                   {grpOpen && list.map(f => {
                     const fKey = 'f:' + f.id
@@ -101,6 +104,7 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
                               {f.name}
                             </span>}
                         {onRenameFlow && !fe && <button onClick={() => beginEdit(fKey, f.name)} title="이름 변경">✎</button>}
+                        {onDelete && !fe && <button className="danger" onClick={() => onDelete([f], f.name)} title="시나리오 삭제">🗑</button>}
                       </div>
                     )
                   })}

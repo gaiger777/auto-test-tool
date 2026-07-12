@@ -35,6 +35,7 @@ fn main() {
             "export_ui_flows",
             "import_ui_flows",
             "stop_ui_replay",
+            "continue_ui_replay",
             "resume_ui_replay",
             "start_replay_mq",
             "stop_replay_mq",

@@ -92,6 +92,7 @@ pub fn run() {
             commands::export_ui_flows,
             commands::import_ui_flows,
             commands::stop_ui_replay,
+            commands::continue_ui_replay,
             commands::resume_ui_replay,
             commands::start_replay_mq,
             commands::stop_replay_mq,
