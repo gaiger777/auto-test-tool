@@ -93,7 +93,15 @@ button.danger:disabled { color: var(--vsc-danger); background: var(--btn); }
 
 /* 조밀 영역(테이블·트리)의 아이콘 버튼은 더 촘촘하게 */
 table.history button { padding: 2px 8px; font-size: 12px; }
-.tree-row button { padding: 1px 7px; font-size: 12px; }
+/* 트리 액션 버튼: 평소 투명, hover 시에만 배경 — 산뜻하게 */
+.tree-row button {
+  padding: 2px 5px; font-size: 12px;
+  background: transparent; border-color: transparent; color: var(--vsc-fg-muted);
+}
+.tree-row button:hover { background: var(--btn-hover); border-color: transparent; color: var(--vsc-fg); }
+.tree-row button.danger { color: var(--vsc-fg-muted); background: transparent; border-color: transparent; }
+.tree-row button.danger:hover { color: #fff; background: var(--btn-danger); }
+.tree-row button .codicon { font-size: 13px; vertical-align: -1px; }
 
 /* 키보드 포커스 링만 표시 (마우스는 숨김) */
 button:focus { outline: none; }

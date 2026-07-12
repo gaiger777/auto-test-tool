@@ -380,7 +380,6 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     var apiWarn = sessionStorage.getItem("__replay_apiwarn")==="1";
     for(var i=start;i<ACTIONS.length;i++){
       var a=ACTIONS[i];
-      var netStart=Date.now();
       // 프로그램 스텝: 웹뷰 안에서 실행(sleep/http_call/assert)하거나 백엔드로 위임(wait_event).
       if(a.kind==="sleep"||a.kind==="http_call"||a.kind==="assert"){
         stopHover();
@@ -413,6 +412,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         }
         stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
       }
+      // API 검증 기준 시각: 실제 동작 직전(대기 중 배경 폴링 호출은 제외).
+      var netStart=Date.now();
       try{ await perform(a, el); }
       catch(e){
         if(a.kind==="hover"){ stepReport(i, "passed", "호버 건너뜀: "+String(e)); sessionStorage.setItem("__replay_idx", String(i+1)); continue; }
