@@ -14,10 +14,11 @@ interface Props {
   onRenameGroup?: (siteUrl: string, oldGroup: string, newGroup: string) => void
   onDelete?: (flows: UiFlowRecord[], label: string) => void
   onPickSite?: (siteUrl: string) => void // URL 클릭 시(예: 레코더 대상 URL 채우기)
+  onPickGroup?: (grp: string) => void // 그룹명 클릭 시(예: 레코더 그룹 입력칸 채우기)
 }
 
 // URL → 그룹 → 시나리오 트리. 리프 클릭은 onPickFlow, URL/그룹의 ▶ 는 onPickMany, ✎ 는 인라인 이름 변경.
-export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup, onDelete, onPickSite }: Props) {
+export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup, onDelete, onPickSite, onPickGroup }: Props) {
   const tree = useMemo(() => {
     const bySite = new Map<string, Map<string, UiFlowRecord[]>>()
     for (const f of flows) {
@@ -86,7 +87,10 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
                     <span className="codicon codicon-folder" aria-hidden="true" />
                     {editing
                       ? editInput(() => commitGroup(site, rawGrp))
-                      : <span style={{ flex: 1 }}>{grpLabel(rawGrp)} <span className="dim">({list.length})</span></span>}
+                      : <span onClick={onPickGroup ? () => onPickGroup(grpLabel(rawGrp)) : undefined}
+                          style={{ flex: 1, cursor: onPickGroup ? 'pointer' : 'default' }}
+                          title={onPickGroup ? '클릭: 이 그룹명을 그룹 입력칸에 넣기' : undefined}>
+                          {grpLabel(rawGrp)} <span className="dim">({list.length})</span></span>}
                     {onRenameGroup && !editing && <button onClick={() => beginEdit(grpKey, grpLabel(rawGrp))} title="그룹명 변경">✎</button>}
                     {onPickMany && !editing && <button onClick={() => onPickMany(list, grpLabel(rawGrp))} title="이 그룹 불러오기">▶</button>}
                     {onDelete && !editing && <button className="danger" onClick={() => onDelete(list, '그룹 ' + grpLabel(rawGrp))} title="이 그룹 삭제"><span className="codicon codicon-trash" aria-hidden="true" /></button>}
