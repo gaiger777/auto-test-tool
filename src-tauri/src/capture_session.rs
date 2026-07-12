@@ -348,20 +348,23 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   // rowtext 대상 행이 현재 페이지에 없으면, 그 표를 1페이지부터 넘겨가며 찾는다(데이터 이동/페이지 변화 대응).
   // 페이지가 더 안 바뀌면(첫 행 텍스트 불변) 중단해 무한 클릭/멈춤을 막는다.
   async function ensureRowVisible(sels){
+    window.__rowDiag="";
     var rt=null; for(var i=0;i<sels.length;i++){ if(sels[i].strategy==="rowtext"){ rt=sels[i]; break; } }
     if(!rt) return;
     var rp=rt.value.split("|||"); var atext=rp[0], tsig=rp[2]||"";
-    if(!tsig) return; // 구버전 기록(표 시그니처 없음)은 페이지 탐색 생략
-    var tbl=findTableBySig(tsig); if(!tbl) return;
-    if(rowInScope(tbl, atext)) return; // 이미 현재 페이지에 있음
+    if(!tsig){ window.__rowDiag="tsig없음(재기록필요)"; return; }
+    var tbl=findTableBySig(tsig); if(!tbl){ window.__rowDiag="표못찾음:"+tsig.slice(0,24); return; }
+    if(rowInScope(tbl, atext)){ window.__rowDiag="현재페이지에있음"; return; }
+    var pages=0;
     // 1페이지로 되감기
     for(var b=0;b<40;b++){ tbl=findTableBySig(tsig)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break;
       var pb=firstRowText(tbl); prev.click(); await sleep(450); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl; if(firstRowText(tbl)===pb) break; }
     // 앞으로 넘기며 탐색
-    for(var f=0;f<80;f++){ tbl=findTableBySig(tsig)||tbl; if(rowInScope(tbl, atext)) return;
-      var next=pagBtn(tbl,"next"); if(pagDisabled(next)) return;
-      var fb=firstRowText(tbl); next.click(); await sleep(500); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl;
-      if(firstRowText(tbl)===fb) return; } // 페이지 안 바뀜 → 중단
+    for(var f=0;f<80;f++){ tbl=findTableBySig(tsig)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
+      var next=pagBtn(tbl,"next"); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
+      var fb=firstRowText(tbl); next.click(); await sleep(500); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl; pages++;
+      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·"+pages+"p"; return; } }
+    window.__rowDiag="끝까지없음·"+pages+"p";
   }
   function bySel(sel){
     try{
@@ -591,7 +594,7 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
             i=-1; continue; // for 루프가 i++ 하여 0부터 재시작
           }
         }
-        stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
+        stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")+(window.__rowDiag?(" ["+window.__rowDiag+"]"):"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
       }
       // API 검증 기준 시각: 실제 동작 직전(대기 중 배경 폴링 호출은 제외).
       var netStart=Date.now();
