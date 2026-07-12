@@ -344,7 +344,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(li.getAttribute && li.getAttribute("aria-disabled")==="true") return true;
     if(li.className && (""+li.className).indexOf("disabled")>=0) return true; return false; }
   function pagBtn(tbl, kind){ var scope=tableScope(tbl);
-    var li=scope.querySelector(kind==="next"?".ant-pagination-next":".ant-pagination-prev"); if(li){ return li.querySelector("button")||li; }
+    // ant-design: 클릭 핸들러는 <li class=ant-pagination-next>에 있다(내부 button은 tabindex=-1 비활성).
+    var li=scope.querySelector(kind==="next"?".ant-pagination-next":".ant-pagination-prev"); if(li){ return li; }
     // 후보(같은 이름 아이콘)를 모두 모아, 표 바로 아래에서 가장 가까운 것을 고른다(다중 표 구분).
     var glyph = kind==="next"?PAG_NEXT:PAG_PREV; var cands=[]; var bs=scope.querySelectorAll("button,[role=button],a,li,span,i");
     for(var i=0;i<bs.length;i++){ var nm=(nameOf(bs[i])||"").toLowerCase().trim();
@@ -379,9 +380,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     // 앞으로 넘기며 탐색
     for(var f=0;f<80;f++){ tbl=findTable(tsig,tidx)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
       var next=pagBtn(tbl,"next"); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
-      var bh=(next.outerHTML||"").replace(/[<>]/g,function(c){return c==="<"?"‹":"›";}).replace(/\s+/g," ").slice(0,140);
       var fb=firstRowText(tbl); robustClick(next); await sleep(600); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; pages++;
-      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·btn["+bh+"]"; return; } }
+      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·"+pages+"p"; return; } }
     window.__rowDiag="끝까지없음·"+pages+"p";
   }
   function bySel(sel){
