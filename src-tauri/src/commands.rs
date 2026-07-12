@@ -20,8 +20,9 @@ pub struct AppState {
     pub capture: Mutex<Option<CaptureHandle>>,
     /// 현재 UI 재생 세션 토큰 (캡처와 독립 — 스위트 연속 실행 시 교체 가능).
     pub replay: Mutex<Option<String>>,
-    /// UI 재생 흐름의 wait_event 스텝을 위한 MQ 세션(환경 선택 시). 흐름 시작 시 연결해 버퍼링.
-    pub replay_bus: Mutex<Option<(Arc<EventBus>, CancellationToken)>>,
+    /// 화면(채널)별 독립 MQ 세션. 키: "env" | "runner" | "capture".
+    /// wait_event 대기 + 프론트 실시간 로그(mq-log)를 채널 단위로 격리한다.
+    pub replay_buses: Mutex<HashMap<String, (Arc<EventBus>, CancellationToken)>>,
 }
 
 pub struct CaptureHandle {
@@ -250,7 +251,7 @@ pub async fn run_scenario(
             .filter(|s| !s.is_empty())
             .collect();
         let uris = build_mq_uris(&env);
-        mq::start_consumer(&uris, &exchanges, bus.clone(), cancel.clone(), None).await?;
+        mq::start_consumer(&uris, &exchanges, bus.clone(), cancel.clone(), None, "run".into()).await?;
         // base_url 변수
         for (svc, url) in &env.endpoints {
             run_vars.insert(format!("base_url.{svc}"), url.trim_end_matches('/').to_string());
@@ -541,15 +542,17 @@ pub fn resume_ui_replay(
     win.eval(&js).map_err(|e| e.to_string())
 }
 
-/// MQ 세션을 시작한다(환경 선택 시). wait_event 대기 + 프론트 실시간 로그(mq-log)를 겸한다.
+/// 채널별 MQ 세션을 시작한다(환경 선택 시). wait_event 대기 + 프론트 실시간 로그(mq-log)를 겸한다.
+/// channel = 화면 식별자("env"|"runner"|"capture") — 화면마다 독립 연결.
 #[tauri::command]
 pub async fn start_replay_mq(
     app: AppHandle,
     state: State<'_, AppState>,
     env_id: i64,
+    channel: String,
 ) -> Result<(), String> {
-    // 기존 세션 정리
-    if let Some((_, cancel)) = state.replay_bus.lock().unwrap().take() {
+    // 같은 채널의 기존 세션만 정리(다른 채널 연결은 유지)
+    if let Some((_, cancel)) = state.replay_buses.lock().unwrap().remove(&channel) {
         cancel.cancel();
     }
     let env = state.db.lock().unwrap().get_environment(env_id)?;
@@ -562,31 +565,32 @@ pub async fn start_replay_mq(
         .filter(|s| !s.is_empty())
         .collect();
     let uris = build_mq_uris(&env);
-    mq::start_consumer(&uris, &exchanges, bus.clone(), cancel.clone(), Some(app)).await?;
-    *state.replay_bus.lock().unwrap() = Some((bus, cancel));
+    mq::start_consumer(&uris, &exchanges, bus.clone(), cancel.clone(), Some(app), channel.clone()).await?;
+    state.replay_buses.lock().unwrap().insert(channel, (bus, cancel));
     Ok(())
 }
 
-/// UI 재생 흐름의 MQ 세션을 종료한다.
+/// 채널별 MQ 세션을 종료한다.
 #[tauri::command]
-pub fn stop_replay_mq(state: State<AppState>) -> Result<(), String> {
-    if let Some((_, cancel)) = state.replay_bus.lock().unwrap().take() {
+pub fn stop_replay_mq(state: State<AppState>, channel: String) -> Result<(), String> {
+    if let Some((_, cancel)) = state.replay_buses.lock().unwrap().remove(&channel) {
         cancel.cancel();
     }
     Ok(())
 }
 
-/// wait_event 스텝을 백엔드 MQ 세션으로 실행한다. (start_replay_mq 로 세션이 먼저 있어야 함)
+/// wait_event 스텝을 채널의 MQ 세션으로 실행한다. (start_replay_mq 로 세션이 먼저 있어야 함)
 #[tauri::command]
 pub async fn run_wait_event(
     state: State<'_, AppState>,
     event_type: String,
     conditions: Vec<crate::models::Condition>,
     timeout_secs: u64,
+    channel: String,
 ) -> Result<String, String> {
     let bus = {
-        let g = state.replay_bus.lock().unwrap();
-        match g.as_ref() {
+        let g = state.replay_buses.lock().unwrap();
+        match g.get(&channel) {
             Some((b, _)) => b.clone(),
             None => return Err("MQ 세션이 없습니다. 환경을 선택해 실행을 시작하세요.".into()),
         }

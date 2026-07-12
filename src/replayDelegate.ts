@@ -4,7 +4,7 @@ import type { UiProgStep } from './types'
 // 재생 중 wait_event 위임 신호(status='delegate')를 백엔드 MQ로 실행한 뒤,
 // 같은 재생 창에서 다음 스텝부터 재개시킨다. 실제 스텝 결과 표시는 재개된
 // 플레이어가 다시 보고(ui-replay-step)하므로 여기서 화면 상태는 건드리지 않는다.
-export async function runDelegatedStep(index: number, detailJson: string, envId: number | null) {
+export async function runDelegatedStep(index: number, detailJson: string, envId: number | null, channel: string) {
   let name = ''
   let step: UiProgStep = {}
   try {
@@ -20,7 +20,7 @@ export async function runDelegatedStep(index: number, detailJson: string, envId:
     detail = (name ? name + ' · ' : '') + 'wait_event: 환경(MQ)이 선택되지 않았습니다'
   } else {
     try {
-      const ev = await api.runWaitEvent(step.event_type || '', step.conditions || [], step.timeout_secs ?? 30)
+      const ev = await api.runWaitEvent(step.event_type || '', step.conditions || [], step.timeout_secs ?? 30, channel)
       detail = (name ? name + ' · ' : '') + '이벤트 수신: ' + ev.slice(0, 200)
     } catch (e) {
       status = 'failed'

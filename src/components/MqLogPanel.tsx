@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { mqLog, type LogRow } from '../mqLog'
+import { mqLogFor, type LogRow } from '../mqLog'
 
 const pretty = (t: string) => { try { return JSON.stringify(JSON.parse(t), null, 2) } catch { return t } }
 
@@ -8,6 +8,7 @@ const pretty = (t: string) => { try { return JSON.stringify(JSON.parse(t), null,
 // 행 클릭 시 JSON 상세 모달. onConnected: '(연결)' 안내가 오면 호출(상위 실패 경고 제거).
 export default function MqLogPanel({ height = 200, onConnected, storageKey = 'default' }:
   { height?: number; onConnected?: () => void; storageKey?: string }) {
+  const mqLog = mqLogFor(storageKey) // 채널별 독립 로그 스토어
   const { rows, connectSeq } = useSyncExternalStore(mqLog.subscribe, mqLog.getSnapshot)
   const [detail, setDetail] = useState<LogRow | null>(null)
   const exKey = `mqlog.exclude.${storageKey}`

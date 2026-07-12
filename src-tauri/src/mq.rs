@@ -15,6 +15,7 @@ pub async fn start_consumer(
     bus: Arc<EventBus>,
     cancel: CancellationToken,
     app: Option<AppHandle>,
+    chan_name: String,
 ) -> Result<(), String> {
     let conn = connect_any(uris).await?;
     let channel = conn.create_channel().await.map_err(|e| format!("채널 생성 실패: {e}"))?;
@@ -34,7 +35,7 @@ pub async fn start_consumer(
     for ex in exchanges {
         let ch = match conn.create_channel().await {
             Ok(c) => c,
-            Err(e) => { warn(&app, format!("채널 생성 실패({ex}): {e}")); continue; }
+            Err(e) => { warn(&app, &chan_name, format!("채널 생성 실패({ex}): {e}")); continue; }
         };
         match ch
             .queue_bind(
@@ -49,14 +50,14 @@ pub async fn start_consumer(
         {
             Ok(_) => {
                 bound += 1;
-                warn(&app, format!("exchange '{ex}' 바인딩됨"));
+                warn(&app, &chan_name, format!("exchange '{ex}' 바인딩됨"));
                 let _ = ch.close(200, "bound".into()).await;
             }
-            Err(e) => warn(&app, format!("exchange '{ex}' 건너뜀: {e}")),
+            Err(e) => warn(&app, &chan_name, format!("exchange '{ex}' 건너뜀: {e}")),
         }
     }
     if bound == 0 {
-        warn(&app, "바인딩된 exchange가 없습니다. exchange 이름을 확인하세요.".into());
+        warn(&app, &chan_name, "바인딩된 exchange가 없습니다. exchange 이름을 확인하세요.".into());
     }
 
     let mut consumer = channel
@@ -70,7 +71,7 @@ pub async fn start_consumer(
         .map_err(|e| format!("소비 시작 실패: {e}"))?;
 
     if let Some(a) = &app {
-        let _ = a.emit("mq-log", serde_json::json!({ "event_type": "(연결)", "text": "RabbitMQ 연결됨 — 알림 수신 대기" }));
+        let _ = a.emit("mq-log", serde_json::json!({ "channel": chan_name, "event_type": "(연결)", "text": "RabbitMQ 연결됨 — 알림 수신 대기" }));
     }
     tokio::spawn(async move {
         loop {
@@ -78,7 +79,7 @@ pub async fn start_consumer(
                 _ = cancel.cancelled() => break,
                 delivery = consumer.next() => {
                     match delivery {
-                        Some(Ok(delivery)) => handle_delivery(&delivery.data, &bus, app.as_ref()),
+                        Some(Ok(delivery)) => handle_delivery(&delivery.data, &bus, app.as_ref(), &chan_name),
                         Some(Err(e)) => { eprintln!("[mq] 소비 에러로 종료: {e}"); break; }
                         None => { eprintln!("[mq] 스트림 종료 (연결 끊김)"); break; }
                     }
@@ -86,7 +87,7 @@ pub async fn start_consumer(
             }
         }
         if let Some(a) = &app {
-            let _ = a.emit("mq-log", serde_json::json!({ "event_type": "(종료)", "text": "RabbitMQ 로그 중단됨" }));
+            let _ = a.emit("mq-log", serde_json::json!({ "channel": chan_name, "event_type": "(종료)", "text": "RabbitMQ 로그 중단됨" }));
         }
         let _ = conn.close(200, "done".into()).await;
     });
@@ -94,9 +95,9 @@ pub async fn start_consumer(
 }
 
 /// 프론트 로그(mq-log)로 안내 메시지를 흘리고 stderr에도 남긴다.
-fn warn(app: &Option<AppHandle>, msg: String) {
+fn warn(app: &Option<AppHandle>, chan_name: &str, msg: String) {
     if let Some(a) = app {
-        let _ = a.emit("mq-log", serde_json::json!({ "event_type": "(안내)", "text": msg }));
+        let _ = a.emit("mq-log", serde_json::json!({ "channel": chan_name, "event_type": "(안내)", "text": msg }));
     }
     eprintln!("[mq] {msg}");
 }
@@ -123,7 +124,7 @@ async fn connect_any(uris: &[String]) -> Result<Connection, String> {
 }
 
 /// 수신 바이트를 파싱·언랩해 버스에 싣는다. app이 있으면 프론트 로그로도 emit. 파싱 실패는 버리되 stderr에 남긴다.
-fn handle_delivery(data: &[u8], bus: &EventBus, app: Option<&AppHandle>) {
+fn handle_delivery(data: &[u8], bus: &EventBus, app: Option<&AppHandle>, chan_name: &str) {
     match serde_json::from_slice::<serde_json::Value>(data) {
         Ok(value) => {
             let ev = unwrap_oslo(value);
@@ -131,7 +132,7 @@ fn handle_delivery(data: &[u8], bus: &EventBus, app: Option<&AppHandle>) {
                 let et = ev.get("event_type").and_then(|v| v.as_str()).unwrap_or("(unknown)").to_string();
                 let text = serde_json::to_string(&ev).unwrap_or_default();
                 let text = if text.len() > 4000 { text[..4000].to_string() } else { text };
-                let _ = a.emit("mq-log", serde_json::json!({ "event_type": et, "text": text }));
+                let _ = a.emit("mq-log", serde_json::json!({ "channel": chan_name, "event_type": et, "text": text }));
             }
             bus.publish(ev);
         }
@@ -179,7 +180,7 @@ mod tests {
     #[tokio::test]
     async fn handle_delivery_publishes_parsed_event() {
         let bus = EventBus::new();
-        handle_delivery(br#"{"event_type":"compute.instance.create.end"}"#, &bus, None);
+        handle_delivery(br#"{"event_type":"compute.instance.create.end"}"#, &bus, None, "test");
         let got = bus
             .wait_for(
                 |e| e["event_type"] == "compute.instance.create.end",
@@ -193,7 +194,7 @@ mod tests {
     #[tokio::test]
     async fn handle_delivery_drops_broken_json() {
         let bus = EventBus::new();
-        handle_delivery(b"not json at all", &bus, None);
+        handle_delivery(b"not json at all", &bus, None, "test");
         let err = bus
             .wait_for(|_| true, std::time::Duration::from_millis(50))
             .await;

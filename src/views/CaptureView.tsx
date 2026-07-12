@@ -4,8 +4,10 @@ import { open } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { correlateCalls, type CapturedCall } from '../capture'
 import { runDelegatedStep } from '../replayDelegate'
-import { mqSession } from '../mqLog'
+import { mqSessionFor } from '../mqLog'
 import MqLogPanel from '../components/MqLogPanel'
+
+const mqSession = mqSessionFor('capture') // 이 화면 전용 독립 MQ 세션
 import { kindLabel, stepSummary } from '../uiStep'
 import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import ProgStepAdder from '../components/ProgStepAdder'
@@ -58,9 +60,9 @@ export default function CaptureView() {
     const unReplay = listen<UiStepResult>('ui-replay-step', e => {
       if (!replayingRef.current) return // 다른 화면이 시작한 재생은 무시
       const r = e.payload
-      if (r.status === 'delegate') { runDelegatedStep(r.index, r.detail, envIdRef.current); return }
+      if (r.status === 'delegate') { runDelegatedStep(r.index, r.detail, envIdRef.current, 'capture'); return }
       if (r.done) {
-        setReplaying(false); api.stopReplayMq().catch(() => {})
+        setReplaying(false) // MQ 로그 연결은 이 화면 소유 — 재생 끝나도 끊지 않음(사용자가 ■ 로그 중단)
         setNotice(r.status === 'passed' ? 'UI 재생 완료' : `UI 재생 중단: ${r.detail}`)
       } else setReplayResults(prev => ({ ...prev, [r.index]: { status: r.status, detail: r.detail } }))
     })
@@ -114,8 +116,8 @@ export default function CaptureView() {
     const needsMq = uiActions.some(a => a.kind === 'wait_event')
     if (needsMq && envId == null) { setError('wait_event 스텝이 있어 환경(MQ) 선택이 필요합니다'); return }
     setReplaying(true)
-    if (needsMq && envId != null) {
-      try { await api.startReplayMq(envId) }
+    if (needsMq && envId != null && mqSession.getEnvId() !== envId) {
+      try { await mqSession.start(envId) }
       catch (e) { setReplaying(false); setError('MQ 연결 실패: ' + String(e)); return }
     }
     const startUrl = uiActions.find(a => a.url)?.url || url
@@ -125,8 +127,7 @@ export default function CaptureView() {
   }
   const cancelReplay = async () => {
     try { await api.stopUiReplay() } catch { /* noop */ }
-    api.stopReplayMq().catch(() => {})
-    setReplaying(false)
+    setReplaying(false) // MQ 로그 연결은 유지(이 화면 소유)
   }
 
   const newScenario = () => {

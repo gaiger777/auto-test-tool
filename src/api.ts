@@ -47,10 +47,10 @@ export const importUiFlows = (path: string) => invoke<number>('import_ui_flows',
 // 인터리브 재생: wait_event 위임 후 같은 창에서 재개
 export const resumeUiReplay = (nextIdx: number, prevStatus: string, prevDetail: string) =>
   invoke<void>('resume_ui_replay', { nextIdx, prevStatus, prevDetail })
-export const startReplayMq = (envId: number) => invoke<void>('start_replay_mq', { envId })
-export const stopReplayMq = () => invoke<void>('stop_replay_mq')
-export const runWaitEvent = (eventType: string, conditions: Condition[], timeoutSecs: number) =>
-  invoke<string>('run_wait_event', { eventType, conditions, timeoutSecs })
+export const startReplayMq = (envId: number, channel: string) => invoke<void>('start_replay_mq', { envId, channel })
+export const stopReplayMq = (channel: string) => invoke<void>('stop_replay_mq', { channel })
+export const runWaitEvent = (eventType: string, conditions: Condition[], timeoutSecs: number, channel: string) =>
+  invoke<string>('run_wait_event', { eventType, conditions, timeoutSecs, channel })
 
 // UI 실행 히스토리
 export const createUiRun = (flowId: number | null, flowName: string, siteUrl: string) =>

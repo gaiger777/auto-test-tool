@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as api from '../api'
 import MqLogPanel from '../components/MqLogPanel'
-import { mqSession } from '../mqLog'
+import { mqSessionFor } from '../mqLog'
+
+const mqSession = mqSessionFor('env') // 이 화면 전용 독립 MQ 세션
 import type { Environment } from '../types'
 
 // RabbitMQ 설정만 사용하는 간소화된 환경. (Keystone/엔드포인트 등은 빈 값으로 저장)
@@ -96,10 +98,11 @@ export default function EnvironmentsView() {
           <ul className="list">
             {envs.map(env => (
               <li key={env.id}>
-                <button onClick={() => edit(env)}>{env.name}</button>
+                <button className={form.id === env.id ? 'accent' : ''} onClick={() => edit(env)}>{env.name}</button>
                 {logEnvId === env.id
                   ? <button className="danger" onClick={stopLog}>■ 로그 중단</button>
-                  : <button onClick={() => startLog(env)}>▶ 로그</button>}
+                  : <button onClick={() => startLog(env)} disabled={form.id !== env.id}
+                      title={form.id !== env.id ? '먼저 환경 이름을 눌러 정보를 확인하세요' : '로그 실행'}>▶ 로그</button>}
                 <button className="danger" onClick={() => remove(env)}>삭제</button>
               </li>
             ))}

@@ -4,7 +4,9 @@ import { save } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { runDelegatedStep } from '../replayDelegate'
 import { kindLabel, stepSummary } from '../uiStep'
-import { mqSession } from '../mqLog'
+import { mqSessionFor } from '../mqLog'
+
+const mqSession = mqSessionFor('runner') // 이 화면 전용 독립 MQ 세션
 import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import FlowTree from '../components/FlowTree'
 import MqLogPanel from '../components/MqLogPanel'
@@ -99,7 +101,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
       const r = e.payload
       const i = runningIdx.current
       if (i == null) return
-      if (r.status === 'delegate') { runDelegatedStep(r.index, r.detail, envIdRef.current); return }
+      if (r.status === 'delegate') { runDelegatedStep(r.index, r.detail, envIdRef.current, 'runner'); return }
       if (r.done) { finishItem(i, r.status, r.detail); return }
       setItems(list => list.map((x, j) =>
         j === i ? { ...x, stepResults: { ...x.stepResults, [r.index]: { status: r.status, detail: r.detail } } } : x))
