@@ -494,6 +494,9 @@ pub fn start_ui_replay(
     tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed))
         .title("UI 재생")
         .initialization_script(&script)
+        // 비영속 세션: 이전 실행의 로그인 쿠키를 물고 와 자동 로그인되는 것을 막는다
+        // (로그인 시나리오가 항상 로그아웃 상태에서 시작). 연속 실행은 같은 창을 재사용해 로그인 유지.
+        .incognito(true)
         .build()
         .map_err(|e| {
             *state.replay.lock().unwrap() = None;
