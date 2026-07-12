@@ -331,7 +331,7 @@ export default function CaptureView() {
                   <tr key={a.id}>
                     <td><input value={posEdits[a.id] ?? String(i + 1)} disabled={replaying}
                       onChange={e => setPosEdits(p => ({ ...p, [a.id]: e.target.value.replace(/[^0-9]/g, '') }))}
-                      onKeyDown={e => { if (e.key === 'Enter') { applyActPos(a.id, i); (e.target as HTMLInputElement).blur() } }}
+                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
                       onBlur={() => applyActPos(a.id, i)}
                       style={{ width: 42, textAlign: 'center', padding: '2px 4px' }} title="번호 입력 후 Enter — 이 위치로 이동" /></td>
                     <td>{kindLabel(a.kind)}</td>
