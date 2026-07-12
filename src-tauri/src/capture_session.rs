@@ -354,6 +354,11 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     for(var c=0;c<cands.length;c++){ var r=cands[c].getBoundingClientRect(); if(r.top<tr.top-5) continue; var d=r.top-tr.bottom; if(d<0) d=Math.abs(d); if(d<bd){ bd=d; best=cands[c]; } }
     return best || cands[0]; }
   function rowInScope(root, atext){ var rows=(root||document).querySelectorAll("tr,[role=row]"); for(var i=0;i<rows.length;i++){ if((rows[i].textContent||"").replace(/\s+/g," ").indexOf(atext)>=0) return rows[i]; } return null; }
+  // 커스텀 페이지네이션 버튼 대응: 단순 .click()이 안 먹는 경우를 위해 전체 이벤트 시퀀스를 쏜다.
+  function robustClick(el){ if(!el) return; try{ el.scrollIntoView({block:"center"}); }catch(e){}
+    var seq=["pointerover","pointerenter","pointerdown","mousedown","pointerup","mouseup","click"];
+    for(var i=0;i<seq.length;i++){ try{ el.dispatchEvent(new MouseEvent(seq[i],{bubbles:true,cancelable:true,view:window})); }catch(e){} }
+    try{ el.click(); }catch(e){} }
   // 첫 '데이터' 행 텍스트(헤더 행 제외). div 그리드([role=row])도 지원 → 페이지 변화 감지에 사용.
   function firstRowText(tbl){ if(!tbl) return ""; var rows=tbl.querySelectorAll("tr,[role=row]");
     for(var i=0;i<rows.length;i++){ if(rows[i].querySelector && rows[i].querySelector("th,[role=columnheader]")) continue;
@@ -370,12 +375,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     var pages=0;
     // 1페이지로 되감기
     for(var b=0;b<40;b++){ tbl=findTable(tsig,tidx)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break;
-      var pb=firstRowText(tbl); prev.click(); await sleep(450); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; if(firstRowText(tbl)===pb) break; }
+      var pb=firstRowText(tbl); robustClick(prev); await sleep(500); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; if(firstRowText(tbl)===pb) break; }
     // 앞으로 넘기며 탐색
     for(var f=0;f<80;f++){ tbl=findTable(tsig,tidx)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
       var next=pagBtn(tbl,"next"); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
-      var fb=firstRowText(tbl); next.click(); await sleep(500); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; pages++;
-      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·"+pages+"p"; return; } }
+      var bn=(nameOf(next)||next.tagName||"?").slice(0,16);
+      var fb=firstRowText(tbl); robustClick(next); await sleep(600); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; pages++;
+      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜(btn:"+bn+")·"+pages+"p"; return; } }
     window.__rowDiag="끝까지없음·"+pages+"p";
   }
   function bySel(sel){
