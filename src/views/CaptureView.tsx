@@ -202,8 +202,9 @@ export default function CaptureView() {
     if (!flowName.trim()) { setError('시나리오 이름을 입력하세요'); return }
     const siteUrl = (url || uiActions.find(a => a.url)?.url || '').replace(/\/+$/, '')
     if (!siteUrl) { setError('사이트 URL이 없습니다'); return }
-    const dup = allFlows.find(f => f.site_url.replace(/\/+$/, '') === siteUrl && f.name === flowName.trim())
-    if (dup && !window.confirm(`"${flowName.trim()}" 시나리오가 이미 있습니다. 덮어쓸까요?`)) return
+    const grpNorm = group.trim() === '기본' ? '' : group.trim()
+    const dup = allFlows.find(f => f.site_url.replace(/\/+$/, '') === siteUrl && (f.grp || '') === grpNorm && f.name === flowName.trim())
+    if (dup && !window.confirm(`"${grpNorm || '기본'}" 그룹에 "${flowName.trim()}" 시나리오가 이미 있습니다. 덮어쓸까요?`)) return
     const withApi: UiAction[] = uiActions.map(a => {
       const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
       return {

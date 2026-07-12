@@ -150,9 +150,10 @@ impl Store {
                id INTEGER PRIMARY KEY,
                name TEXT NOT NULL,
                site_url TEXT NOT NULL,
+               grp TEXT NOT NULL DEFAULT '',
                actions_json TEXT NOT NULL,
                updated_at TEXT NOT NULL,
-               UNIQUE(site_url, name)
+               UNIQUE(site_url, grp, name)
              );
              CREATE TABLE IF NOT EXISTS ui_runs (
                id INTEGER PRIMARY KEY,
@@ -182,6 +183,34 @@ impl Store {
         // 정규화(멱등): 명시적 '기본' 그룹을 빈 문자열로 통일 → '기본'과 빈 그룹이 갈라지지 않게.
         conn.execute("UPDATE ui_flows SET grp='' WHERE grp='기본'", [])
             .map_err(|e| e.to_string())?;
+        // 마이그레이션(1회): ui_flows 유니크 (site_url, name) → (site_url, grp, name).
+        // 같은 이름이 다른 그룹에 공존 가능 → 다른 그룹으로 '복사' 저장 지원.
+        let old_unique = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='ui_flows'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .map(|s| s.contains("UNIQUE(site_url, name)"))
+            .unwrap_or(false);
+        if old_unique {
+            conn.execute_batch(
+                "CREATE TABLE ui_flows_new (
+                   id INTEGER PRIMARY KEY,
+                   name TEXT NOT NULL,
+                   site_url TEXT NOT NULL,
+                   grp TEXT NOT NULL DEFAULT '',
+                   actions_json TEXT NOT NULL,
+                   updated_at TEXT NOT NULL,
+                   UNIQUE(site_url, grp, name)
+                 );
+                 INSERT INTO ui_flows_new (id, name, site_url, grp, actions_json, updated_at)
+                   SELECT id, name, site_url, grp, actions_json, updated_at FROM ui_flows;
+                 DROP TABLE ui_flows;
+                 ALTER TABLE ui_flows_new RENAME TO ui_flows;",
+            )
+            .map_err(|e| e.to_string())?;
+        }
         // 마이그레이션: RabbitMQ 클러스터 호스트/계정 컬럼 추가.
         for (col, default) in [
             ("mq_hosts", "''"),
@@ -372,14 +401,14 @@ impl Store {
         self.conn
             .execute(
                 "INSERT INTO ui_flows (name, site_url, grp, actions_json, updated_at) VALUES (?1,?2,?3,?4,?5)
-                 ON CONFLICT(site_url, name) DO UPDATE SET grp=?3, actions_json=?4, updated_at=?5",
+                 ON CONFLICT(site_url, grp, name) DO UPDATE SET actions_json=?4, updated_at=?5",
                 params![name, site_url, grp, actions_json, updated_at],
             )
             .map_err(|e| e.to_string())?;
         self.conn
             .query_row(
-                "SELECT id FROM ui_flows WHERE site_url=?1 AND name=?2",
-                params![site_url, name],
+                "SELECT id FROM ui_flows WHERE site_url=?1 AND grp=?2 AND name=?3",
+                params![site_url, grp, name],
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())

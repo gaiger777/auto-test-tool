@@ -139,16 +139,24 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   const pickFlow = (f: UiFlowRecord) => addFlows([f])
   const pickMany = (flows: UiFlowRecord[]) => addFlows(flows)
   const clearSuite = () => { setItems([]); setInfo(''); setError('') }
-  // 현재 목록(편집 반영)을 지정한 그룹으로 저장(이동). 이름은 사이트당 유일하므로 grp만 갱신된다.
+  // 현재 목록(편집 반영)을 지정한 그룹으로 '새로' 저장한다. 원본은 그대로(다른 그룹이면 별개 시나리오로 생성).
+  // 이름 중복은 검증으로 막는다: 세트 내 중복 + 대상 그룹에 이미 있는 이름.
   const saveAsGroup = async () => {
     setError(''); setInfo('')
     const g = saveGroup.trim()
     if (!g) { setError('저장할 그룹 이름을 입력하세요'); return }
     if (!items.length) { setError('저장할 시나리오가 없습니다'); return }
-    if (!window.confirm(`현재 ${items.length}개 시나리오를 '${g}' 그룹으로 저장할까요? (기존 그룹에서 이동)`)) return
+    const gNorm = g === '기본' ? '' : g
+    const site = items[0].siteUrl
+    const names = items.map(it => it.name)
+    const inSet = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))]
+    if (inSet.length) { setError(`세트 안에 중복된 이름이 있습니다: ${inSet.join(', ')}`); return }
+    const taken = new Set(allFlows.filter(f => f.site_url === site && (f.grp || '') === gNorm).map(f => f.name))
+    const dups = names.filter(n => taken.has(n))
+    if (dups.length) { setError(`'${g}' 그룹에 이미 있는 이름: ${dups.join(', ')} — 다른 그룹명으로 저장하세요`); return }
+    if (!window.confirm(`현재 ${items.length}개 시나리오를 '${g}' 그룹으로 새로 저장할까요? (원본은 유지)`)) return
     try {
-      for (const it of items) await api.saveUiFlow(it.name, it.siteUrl, g, it.actions)
-      setItems(list => list.map(x => ({ ...x, grp: g })))
+      for (const it of items) await api.saveUiFlow(it.name, it.siteUrl, gNorm, it.actions)
       await reloadFlows()
       window.dispatchEvent(new CustomEvent('ui-flows-changed'))
       setInfo(`${items.length}개 시나리오를 '${g}' 그룹으로 저장했습니다`)
