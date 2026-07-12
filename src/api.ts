@@ -61,3 +61,5 @@ export const saveUiRunStep = (runId: number, stepIndex: number, kind: string, na
 export const finishUiRun = (runId: number, status: string) => invoke<void>('finish_ui_run', { runId, status })
 export const listUiRuns = () => invoke<UiRunRecord[]>('list_ui_runs')
 export const listUiRunSteps = (runId: number) => invoke<UiRunStepRecord[]>('list_ui_run_steps', { runId })
+export const deleteUiRun = (id: number) => invoke<void>('delete_ui_run', { id })
+export const clearUiRuns = () => invoke<void>('clear_ui_runs')

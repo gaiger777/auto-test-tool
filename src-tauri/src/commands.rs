@@ -705,6 +705,18 @@ pub fn list_ui_run_steps(
     state.db.lock().unwrap().list_ui_run_steps(run_id)
 }
 
+/// 실행 히스토리 한 건 삭제(스텝 결과 포함).
+#[tauri::command]
+pub fn delete_ui_run(state: State<AppState>, id: i64) -> Result<(), String> {
+    state.db.lock().unwrap().delete_ui_run(id)
+}
+
+/// 실행 히스토리 전체 삭제.
+#[tauri::command]
+pub fn clear_ui_runs(state: State<AppState>) -> Result<(), String> {
+    state.db.lock().unwrap().clear_ui_runs()
+}
+
 /// 기록한 UI 동작 목록을 JSON 파일로 저장한다.
 #[tauri::command]
 pub fn save_ui_actions(path: String, actions: Vec<capture_server::UiAction>) -> Result<(), String> {

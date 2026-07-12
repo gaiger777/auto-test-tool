@@ -654,6 +654,22 @@ impl Store {
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     }
+
+    pub fn delete_ui_run(&self, run_id: i64) -> Result<(), String> {
+        self.conn
+            .execute("DELETE FROM ui_run_steps WHERE run_id=?1", params![run_id])
+            .map_err(|e| e.to_string())?;
+        self.conn
+            .execute("DELETE FROM ui_runs WHERE id=?1", params![run_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn clear_ui_runs(&self) -> Result<(), String> {
+        self.conn.execute("DELETE FROM ui_run_steps", []).map_err(|e| e.to_string())?;
+        self.conn.execute("DELETE FROM ui_runs", []).map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 // --- OS 키체인 (환경 비밀번호) ---

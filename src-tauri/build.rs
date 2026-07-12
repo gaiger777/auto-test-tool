@@ -45,6 +45,8 @@ fn main() {
             "finish_ui_run",
             "list_ui_runs",
             "list_ui_run_steps",
+            "delete_ui_run",
+            "clear_ui_runs",
             "rename_ui_flow",
             "rename_ui_group",
         ])),

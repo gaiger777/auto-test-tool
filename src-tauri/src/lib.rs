@@ -102,6 +102,8 @@ pub fn run() {
             commands::finish_ui_run,
             commands::list_ui_runs,
             commands::list_ui_run_steps,
+            commands::delete_ui_run,
+            commands::clear_ui_runs,
             commands::rename_ui_flow,
             commands::rename_ui_group
         ])

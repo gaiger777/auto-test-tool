@@ -43,6 +43,8 @@
     "allow-finish-ui-run",
     "allow-list-ui-runs",
     "allow-list-ui-run-steps",
+    "allow-delete-ui-run",
+    "allow-clear-ui-runs",
     "allow-rename-ui-flow",
     "allow-rename-ui-group"
   ]
