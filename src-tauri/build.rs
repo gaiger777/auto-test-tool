@@ -22,6 +22,7 @@ fn main() {
             "capture_session_active",
             "capture_push",
             "ui_record",
+            "set_ui_recording",
             "start_ui_replay",
             "ui_replay_step",
             "save_ui_actions",

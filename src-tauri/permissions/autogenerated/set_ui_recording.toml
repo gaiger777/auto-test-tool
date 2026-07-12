@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-ui-recording"
+description = "Enables the set_ui_recording command without any pre-configured scope."
+commands.allow = ["set_ui_recording"]
+
+[[permission]]
+identifier = "deny-set-ui-recording"
+description = "Denies the set_ui_recording command without any pre-configured scope."
+commands.deny = ["set_ui_recording"]

@@ -22,6 +22,7 @@ export const cancelRun = (runId: number) => invoke<void>('cancel_run', { runId }
 export const startCaptureSession = (url: string) => invoke<void>('start_capture_session', { url })
 export const stopCaptureSession = () => invoke<void>('stop_capture_session')
 export const captureSessionActive = () => invoke<boolean>('capture_session_active')
+export const setUiRecording = (enabled: boolean) => invoke<void>('set_ui_recording', { enabled })
 
 export const startUiReplay = (url: string, actions: UiAction[]) =>
   invoke<void>('start_ui_replay', { url, actions })

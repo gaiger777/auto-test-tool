@@ -29,6 +29,8 @@ pub struct CaptureHandle {
     pub cancel: CancellationToken,
     /// 세션 단조 증가 id 카운터. 페이지 재탐색으로 스크립트 seq가 리셋돼도 id 충돌이 없도록 한다.
     pub seq: Arc<std::sync::atomic::AtomicU64>,
+    /// UI 레코딩 on/off. 세션 시작 시 false(로그인 등은 기록 안 함), 사용자가 레코드 시작 시 true.
+    pub recording: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn now() -> String {
@@ -350,7 +352,12 @@ pub fn start_capture_session(
         if guard.is_some() {
             return Err("이미 캡처 세션이 진행 중입니다".into());
         }
-        *guard = Some(CaptureHandle { id: token.clone(), cancel: cancel.clone(), seq });
+        *guard = Some(CaptureHandle {
+            id: token.clone(),
+            cancel: cancel.clone(),
+            seq,
+            recording: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
     }
     // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
     if let Some(win) = app.get_webview_window("capture") {
@@ -429,7 +436,13 @@ pub fn ui_record(
     let seq = {
         let guard = state.capture.lock().unwrap();
         match guard.as_ref() {
-            Some(h) if h.id == token => h.seq.clone(),
+            // 레코딩 off면 조용히 무시(로그인 등 사전 조작은 기록하지 않음)
+            Some(h) if h.id == token => {
+                if !h.recording.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok(());
+                }
+                h.seq.clone()
+            }
             _ => return Err("활성 캡처 세션이 아니거나 토큰 불일치".into()),
         }
     };
@@ -437,6 +450,19 @@ pub fn ui_record(
     action.id = format!("u{n}");
     let _ = app.emit("ui-recorded", action);
     Ok(())
+}
+
+/// UI 레코딩 시작/정지 토글. 세션은 유지한 채 클릭/입력 기록만 켜고 끈다.
+#[tauri::command]
+pub fn set_ui_recording(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    let guard = state.capture.lock().unwrap();
+    match guard.as_ref() {
+        Some(h) => {
+            h.recording.store(enabled, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+        None => Err("활성 캡처 세션이 없습니다".into()),
+    }
 }
 
 /// 기록된 UI 동작을 재생 웹뷰("replay")에서 실행한다. (셀렉터 자가치유 + actionability 대기)

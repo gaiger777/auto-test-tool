@@ -79,6 +79,7 @@ pub fn run() {
             commands::capture_session_active,
             commands::capture_push,
             commands::ui_record,
+            commands::set_ui_recording,
             commands::start_ui_replay,
             commands::ui_replay_step,
             commands::save_ui_actions,

@@ -13,6 +13,7 @@ import type { Environment, UiAction, UiStepResult, UiFlowRecord } from '../types
 export default function CaptureView() {
   const [url, setUrl] = useState('')
   const [active, setActive] = useState(false)
+  const [recording, setRecording] = useState(false)
   const [calls, setCalls] = useState<CapturedCall[]>([]) // 화면엔 안 보이지만 동작별 API 상관에 사용
   const [uiActions, setUiActions] = useState<UiAction[]>([])
   const [replaying, setReplaying] = useState(false)
@@ -53,7 +54,7 @@ export default function CaptureView() {
       } else setReplayResults(prev => ({ ...prev, [r.index]: { status: r.status, detail: r.detail } }))
     })
     const unEnd = listen('capture-session-ended', () => {
-      setActive(false); setReplaying(false)
+      setActive(false); setReplaying(false); setRecording(false)
       setNotice('세션이 종료되었습니다. 목록은 유지됩니다.')
     })
     const onFlows = () => reloadFlows()
@@ -74,15 +75,22 @@ export default function CaptureView() {
     try {
       await api.startCaptureSession(url)
       setActive(true)
+      setRecording(false) // 레코드는 꺼진 채 시작 — 로그인 등은 사용자가 레코드 시작 전까지 기록 안 됨
       startedAt.current = Date.now()
       setCalls([]); setReplayResults({})
     } catch (e) { setError(String(e)) }
   }
 
+  const toggleRecord = async () => {
+    const next = !recording
+    try { await api.setUiRecording(next); setRecording(next) }
+    catch (e) { setError(String(e)) }
+  }
+
   const stop = async () => {
     try {
       await api.stopCaptureSession()
-      setActive(false)
+      setActive(false); setRecording(false)
       if (calls.length === 0 && uiActions.length === 0 && Date.now() - startedAt.current > 3000) {
         setNotice('캡처가 0건입니다. 대상 사이트의 CSP로 후킹이 차단됐을 수 있습니다.')
       }
@@ -233,8 +241,12 @@ export default function CaptureView() {
             <input placeholder="대상 사이트 URL (https://...)" value={url}
               onChange={e => setUrl(e.target.value)} disabled={active || replaying} style={{ minWidth: 300 }} />
             {!active
-              ? <button className="accent" onClick={start} disabled={replaying}>세션 시작(레코드)</button>
+              ? <button className="accent" onClick={start} disabled={replaying}>세션 시작</button>
               : <button className="danger" onClick={stop}>세션 종료</button>}
+            {active && (recording
+              ? <button className="danger" onClick={toggleRecord}>■ 레코드 정지</button>
+              : <button className="accent" onClick={toggleRecord}>● 레코드 시작</button>)}
+            {active && <span className="dim">{recording ? '레코드 중 — 클릭/입력이 기록됩니다' : '세션 열림 — 레코드 시작 전까지 UI 동작은 기록 안 됨'}</span>}
           </div>
 
           {error && <p className="error">{error}</p>}
