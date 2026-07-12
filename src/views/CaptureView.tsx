@@ -136,7 +136,7 @@ export default function CaptureView() {
     setUiActions([]); setReplayResults({}); setFlowName(''); setLoadedFlowId(null); setNotice('새 시나리오 — 세션을 시작해 기록하거나 스텝을 추가하세요.')
   }
   const addStep = (a: UiAction) => { setUiActions(prev => [...prev, a]); setReplayResults({}) }
-  const delUi = (i: number) => { setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}) }
+  const delUi = (i: number) => { if (!window.confirm('이 동작을 삭제하시겠습니까?')) return; setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}) }
   const moveUi = (i: number, d: -1 | 1) => {
     const j = i + d
     if (j < 0 || j >= uiActions.length) return
@@ -301,7 +301,7 @@ export default function CaptureView() {
             <input placeholder="시나리오 이름" value={flowName} onChange={e => setFlowName(e.target.value)} style={{ width: 160 }} />
             <button className="accent" onClick={saveFlow} disabled={uiActions.length === 0}>DB 저장</button>
             <button className="danger" onClick={deleteLoaded} disabled={loadedFlowId == null}>선택 삭제</button>
-            <button className="danger" onClick={() => { setUiActions([]); setReplayResults({}) }}
+            <button className="danger" onClick={() => { if (window.confirm('기록한 UI 동작을 모두 삭제하시겠습니까?')) { setUiActions([]); setReplayResults({}) } }}
               disabled={uiActions.length === 0 || replaying}>동작 비우기</button>
           </div>
 
