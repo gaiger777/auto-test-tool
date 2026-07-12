@@ -59,10 +59,16 @@ export default function EnvironmentsView() {
     if (!form.name.trim()) { setError('이름을 입력하세요'); return }
     const cleanHosts = hosts.map(r => r.v.trim()).filter(Boolean)
     if (cleanHosts.length === 0) { setError('RabbitMQ 호스트(host:port)를 1개 이상 입력하세요'); return }
+    const savedId = form.id // reset 전에 편집 대상 id 보관
     try {
       await api.saveEnvironment({ ...form, mq_hosts: cleanHosts.join(','), mq_url: '' }, null)
       reset()
       reload()
+      // 편집한 환경의 로그가 켜져 있으면 새 접속 정보로 재연결(로그 새로고침)
+      if (savedId != null && logEnvId === savedId) {
+        await mqSession.stop()
+        await mqSession.start(savedId).catch(e => setError('RabbitMQ 재연결 실패: ' + String(e)))
+      }
     } catch (e) { setError(String(e)) }
   }
 
