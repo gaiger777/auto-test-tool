@@ -187,8 +187,17 @@ pub fn recorder_script(token: &str) -> String {
     return out;
   }}
   function hrefOf(el) {{ try {{ var a = el.closest ? el.closest("a[href]") : null; return (a && a.href) ? a.href : null; }} catch (e) {{ return null; }} }}
+  // 페이지네이션(다음/이전/페이지번호) 조작은 기록하지 않는다 — 재생 시 플레이어가 대상 행을
+  // 이름으로 찾으며 필요한 만큼 페이지를 자동으로 넘긴다.
+  function isPagination(el) {{ try {{
+    if (!el || !el.closest) return false;
+    if (el.closest(".ant-pagination, [class*=pagination], [class*=Pagination], nav[aria-label*=age]")) return true;
+    var nm = (nameOf(el) || "").toLowerCase();
+    return /keyboard_arrow_right|keyboard_arrow_left|chevron_right|chevron_left|first_page|last_page/.test(nm);
+  }} catch (e) {{ return false; }} }}
   function record(kind, el, value) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
+    if ((kind === "click" || kind === "hover") && isPagination(el)) return; // 페이지네이션 조작 제외
     send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
             value: (value != null ? String(value) : null), href: (kind === "click" ? hrefOf(el) : null),
             url: location.href, timestamp: Date.now() }});
@@ -234,6 +243,7 @@ pub fn recorder_script(token: &str) -> String {
   document.addEventListener("mouseover", function(e) {{ __lastOver = {{ el: e.target, t: Date.now() }}; }}, true);
   function recordHover(el) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
+    if (isPagination(el)) return; // 페이지네이션 호버 제외
     if (__lastHover && __lastHover.el === el && Date.now() - __lastHover.t < 1500) return;
     __lastHover = {{ el: el, t: Date.now() }};
     send({{ id: "u" + (++uiseq), kind: "hover", selectors: ladder(el), name: nameOf(el),
