@@ -206,7 +206,6 @@ pub fn recorder_script(token: &str) -> String {
   }} catch (e) {{ return false; }} }}
   function record(kind, el, value) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
-    if ((kind === "click" || kind === "hover") && isPagination(el)) return; // 페이지네이션 조작 제외
     send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
             value: (value != null ? String(value) : null), href: (kind === "click" ? hrefOf(el) : null),
             url: location.href, timestamp: Date.now() }});
@@ -252,7 +251,6 @@ pub fn recorder_script(token: &str) -> String {
   document.addEventListener("mouseover", function(e) {{ __lastOver = {{ el: e.target, t: Date.now() }}; }}, true);
   function recordHover(el) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
-    if (isPagination(el)) return; // 페이지네이션 호버 제외
     if (__lastHover && __lastHover.el === el && Date.now() - __lastHover.t < 1500) return;
     __lastHover = {{ el: el, t: Date.now() }};
     send({{ id: "u" + (++uiseq), kind: "hover", selectors: ladder(el), name: nameOf(el),
@@ -363,6 +361,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     for(var i=0;i<seq.length;i++){ try{ el.dispatchEvent(new MouseEvent(seq[i],{bubbles:true,cancelable:true,view:window})); }catch(e){} }
     try{ el.click(); }catch(e){} }
   // 첫 '데이터' 행 텍스트(헤더 행 제외). div 그리드([role=row])도 지원 → 페이지 변화 감지에 사용.
+  // 녹화 때 사용자가 누른 '다음' 버튼을 우선 사용(가장 확실). 없으면 휴리스틱으로 추정.
+  function nextBtn(tbl){ var b=window.__lastNextBtn;
+    if(b && b.isConnected && isVisible(b,true) && !pagDisabled(b)) return b;
+    return pagBtn(tbl,"next"); }
   function firstRowText(tbl){ if(!tbl) return ""; var rows=tbl.querySelectorAll("tr,[role=row]");
     for(var i=0;i<rows.length;i++){ if(rows[i].querySelector && rows[i].querySelector("th,[role=columnheader]")) continue;
       var t=(rows[i].textContent||"").replace(/\s+/g," ").trim(); if(t) return t.slice(0,80); } return ""; }
@@ -381,7 +383,7 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       var pb=firstRowText(tbl); robustClick(prev); await sleep(500); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; if(firstRowText(tbl)===pb) break; }
     // 앞으로 넘기며 탐색
     for(var f=0;f<80;f++){ tbl=findTable(tsig,tidx)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
-      var next=pagBtn(tbl,"next"); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
+      var next=nextBtn(tbl); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
       var fb=firstRowText(tbl); robustClick(next); await sleep(600); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; pages++;
       if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·"+pages+"p"; return; } }
     window.__rowDiag="끝까지없음·"+pages+"p";
@@ -491,9 +493,14 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     else {
       // 호버가 유지 중이면 클릭 대상 자신에도 hover를 얹어(중첩 메뉴 대응) 클릭한다.
       if(__hoverTimer){ pushHover(el); await sleep(60); }
-      // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
-      var radio = isRadioLike(el) ? el : (el.querySelector ? el.querySelector('input[type=radio],input[type=checkbox]') : null);
-      if(radio){ radio.click(); } else { el.click(); }
+      // ant-pagination: 실제 클릭 타겟은 <li>(내부 button은 tabindex=-1 비활성). 녹화한 '다음'을 기억해둔다.
+      var pagLi = el.closest ? el.closest("li.ant-pagination-next, li.ant-pagination-prev, li.ant-pagination-item") : null;
+      if(pagLi){ if((""+pagLi.className).indexOf("ant-pagination-next")>=0) window.__lastNextBtn=pagLi; robustClick(pagLi); }
+      else {
+        // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
+        var radio = isRadioLike(el) ? el : (el.querySelector ? el.querySelector('input[type=radio],input[type=checkbox]') : null);
+        if(radio){ radio.click(); } else { el.click(); }
+      }
     }
   }
   // 프로그램 스텝 값 치환: 직전 http_call 응답을 {{status}}/{{body}}로 참조 가능.
