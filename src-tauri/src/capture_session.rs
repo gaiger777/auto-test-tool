@@ -161,7 +161,10 @@ pub fn recorder_script(token: &str) -> String {
     // 가장 긴 것을 앵커로 고른다(대개 이름 컬럼). 정렬·페이징으로 위치가 바뀌어도 올바른 행 매칭.
     var row = el.closest ? el.closest("tr, [role=row]") : null;
     if (row) {{
-      var tbl = row.closest("table, [role=table], [role=grid]") || row.parentElement;
+      var tbl = row.closest("table, [role=table], [role=grid], [role=treegrid]");
+      // div 기반 그리드: 여러 [role=row]/tr 를 담은 가장 가까운 조상을 표로 본다.
+      if (!tbl && row.parentElement) {{ var pp = row.parentElement; for (var pk = 0; pk < 7 && pp; pk++) {{ if (pp.querySelectorAll && pp.querySelectorAll("[role=row], tr").length > 1) {{ tbl = pp; break; }} pp = pp.parentElement; }} }}
+      if (!tbl) tbl = row.parentElement;
       var siblingRows = tbl ? tbl.querySelectorAll("tr, [role=row]") : [row];
       function normTxt(n) {{ return (n.textContent || "").replace(/\s+/g, " ").trim(); }}
       var cells = row.querySelectorAll("td, th, [role=cell], [role=gridcell]");
@@ -178,9 +181,12 @@ pub fn recorder_script(token: &str) -> String {
       var ths = tbl ? tbl.querySelectorAll("th, [role=columnheader]") : [];
       var tsg = [];
       for (var ti = 0; ti < ths.length && tsg.length < 6; ti++) {{ var tx = normTxt(ths[ti]); if (tx) tsg.push(tx.slice(0, 20)); }}
+      // 헤더로 식별 안 될 때(div 그리드 등)를 위한 위치 인덱스 폴백.
+      var grids = document.querySelectorAll("table, [role=table], [role=grid], [role=treegrid]");
+      var tidx = -1; for (var gk = 0; gk < grids.length; gk++) {{ if (grids[gk] === tbl || grids[gk].contains(row)) {{ tidx = gk; break; }} }}
       if (anchor) {{
         var hint = isRadio ? "radio" : (role ? ("role:" + role) : ("tag:" + el.tagName.toLowerCase()));
-        out.push({{ strategy: "rowtext", value: anchor + "|||" + hint + "|||" + tsg.join("~") }});
+        out.push({{ strategy: "rowtext", value: anchor + "|||" + hint + "|||" + tsg.join("~") + "|||" + tidx }});
       }}
     }}
     out.push({{ strategy: "css", value: cssPath(el) }});
@@ -317,9 +323,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     return vtext(el).slice(0,60) || (el.value||""); }
   // ── 표(테이블) 헬퍼: 시그니처로 표 식별, 페이지 넘김 ──
   function tableSigOf(t){ if(!t) return ""; var ths=t.querySelectorAll("th,[role=columnheader]"); var ps=[]; for(var i=0;i<ths.length&&ps.length<6;i++){ var x=(ths[i].textContent||"").replace(/\s+/g," ").trim(); if(x) ps.push(x.slice(0,20)); } return ps.join("~"); }
-  function findTableBySig(tsig){ var ts=document.querySelectorAll("table,[role=table],[role=grid]"); if(!tsig) return ts[0]||null;
+  function allGrids(){ return document.querySelectorAll("table,[role=table],[role=grid],[role=treegrid]"); }
+  function findTableBySig(tsig){ var ts=allGrids(); if(!tsig) return null;
     for(var i=0;i<ts.length;i++){ if(tableSigOf(ts[i])===tsig) return ts[i]; }
     var want=tsig.split("~")[0]; for(var j=0;j<ts.length;j++){ if(want && tableSigOf(ts[j]).indexOf(want)>=0) return ts[j]; } return null; }
+  // 헤더 시그니처로 못 찾으면 위치 인덱스(tidx)로 폴백.
+  function findTable(tsig, tidx){ var t = tsig ? findTableBySig(tsig) : null; if(t) return t;
+    var gs=allGrids(); if(tidx!=null && tidx>=0 && gs[tidx]) return gs[tidx]; return gs[0]||null; }
   var PAG_NEXT=["keyboard_arrow_right","chevron_right","navigate_next","arrow_forward_ios","다음","next"];
   var PAG_PREV=["keyboard_arrow_left","chevron_left","navigate_before","arrow_back_ios","이전","previous","prev"];
   function findPagBtnIn(scope, glyph){ if(!scope||!scope.querySelectorAll) return null;
@@ -351,18 +361,17 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     window.__rowDiag="";
     var rt=null; for(var i=0;i<sels.length;i++){ if(sels[i].strategy==="rowtext"){ rt=sels[i]; break; } }
     if(!rt) return;
-    var rp=rt.value.split("|||"); var atext=rp[0], tsig=rp[2]||"";
-    if(!tsig){ window.__rowDiag="tsig없음(재기록필요)"; return; }
-    var tbl=findTableBySig(tsig); if(!tbl){ window.__rowDiag="표못찾음:"+tsig.slice(0,24); return; }
+    var rp=rt.value.split("|||"); var atext=rp[0], tsig=rp[2]||"", tidx=(rp[3]!=null?parseInt(rp[3],10):-1);
+    var tbl=findTable(tsig, tidx); if(!tbl){ window.__rowDiag="표못찾음:"+tsig.slice(0,20)+"/idx"+tidx; return; }
     if(rowInScope(tbl, atext)){ window.__rowDiag="현재페이지에있음"; return; }
     var pages=0;
     // 1페이지로 되감기
-    for(var b=0;b<40;b++){ tbl=findTableBySig(tsig)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break;
-      var pb=firstRowText(tbl); prev.click(); await sleep(450); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl; if(firstRowText(tbl)===pb) break; }
+    for(var b=0;b<40;b++){ tbl=findTable(tsig,tidx)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break;
+      var pb=firstRowText(tbl); prev.click(); await sleep(450); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; if(firstRowText(tbl)===pb) break; }
     // 앞으로 넘기며 탐색
-    for(var f=0;f<80;f++){ tbl=findTableBySig(tsig)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
+    for(var f=0;f<80;f++){ tbl=findTable(tsig,tidx)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
       var next=pagBtn(tbl,"next"); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
-      var fb=firstRowText(tbl); next.click(); await sleep(500); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl; pages++;
+      var fb=firstRowText(tbl); next.click(); await sleep(500); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; pages++;
       if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·"+pages+"p"; return; } }
     window.__rowDiag="끝까지없음·"+pages+"p";
   }
@@ -381,9 +390,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         return ms[ridx] || ms[0] || null; }
       if(sel.strategy==="text"){ var els=document.querySelectorAll('a,button,[role=button],summary,label');
         for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
-      if(sel.strategy==="rowtext"){ // "행앵커|||힌트|||표시그니처" → (그 표 안에서) 앵커 텍스트를 가진 행의 타겟
-        var rp=sel.value.split("|||"); var atext=rp[0], hint=rp[1]||"", tsig=rp[2]||"";
-        var scopeTbl = tsig ? findTableBySig(tsig) : null;
+      if(sel.strategy==="rowtext"){ // "행앵커|||힌트|||표시그니처|||표index" → (그 표 안에서) 앵커 행의 타겟
+        var rp=sel.value.split("|||"); var atext=rp[0], hint=rp[1]||"", tsig=rp[2]||"", tidx=(rp[3]!=null?parseInt(rp[3],10):-1);
+        var scopeTbl = findTable(tsig, tidx);
         var rows=(scopeTbl||document).querySelectorAll('tr, [role=row]');
         for(var k=0;k<rows.length;k++){
           if((rows[k].textContent||"").replace(/\s+/g," ").indexOf(atext)<0) continue;
