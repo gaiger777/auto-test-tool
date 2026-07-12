@@ -12,6 +12,7 @@ import { kindLabel, stepSummary } from '../uiStep'
 import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import ProgStepAdder from '../components/ProgStepAdder'
 import FlowTree, { groupOf } from '../components/FlowTree'
+import { useColumnWidth } from '../hooks/useColumnWidth'
 import type { Environment, UiAction, UiStepResult, UiFlowRecord } from '../types'
 
 export default function CaptureView() {
@@ -31,6 +32,7 @@ export default function CaptureView() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [modalCalls, setModalCalls] = useState<{ title: string; calls: CallLike[] } | null>(null)
+  const tree = useColumnWidth('capture.treeW', 280)
   const startedAt = useRef(0)
   const envIdRef = useRef<number | null>(null)
   useEffect(() => { envIdRef.current = envId }, [envId])
@@ -246,9 +248,9 @@ export default function CaptureView() {
     <div>
       <h2>UI 레코더</h2>
       <p className="dim">세션을 시작해 클릭·입력·호버를 기록하고, http_call·wait_event·assert·sleep 스텝을 끼워넣어 그룹별로 저장·재생합니다.</p>
-      <div className="two-col" style={{ gridTemplateColumns: '280px 1fr', alignItems: 'start', gap: 16 }}>
-        {/* 좌측: 시나리오 트리 */}
-        <div style={{ borderRight: '1px solid var(--vsc-border)', paddingRight: 12 }}>
+      <div className="split-row">
+        {/* 좌측: 시나리오 트리 (드래그로 너비 조절) */}
+        <div style={{ width: tree.width, flex: '0 0 auto', overflow: 'auto', paddingRight: 12 }}>
           <div className="add-row" style={{ marginBottom: 8 }}>
             <strong style={{ fontSize: 13 }}>시나리오</strong>
             <button onClick={newScenario}>+ 새 시나리오</button>
@@ -259,9 +261,10 @@ export default function CaptureView() {
             <button onClick={doImport} disabled={active || replaying}>DB 가져오기</button>
           </div>
         </div>
+        <div className="col-resizer" onMouseDown={tree.onMouseDown} title="드래그로 너비 조절" />
 
         {/* 우측: 편집기 */}
-        <div>
+        <div style={{ flex: 1, minWidth: 0, paddingLeft: 12 }}>
           <div className="add-row">
             <input placeholder="대상 사이트 URL (https://...)" value={url}
               onChange={e => setUrl(e.target.value)} disabled={active || replaying} style={{ minWidth: 300 }} />

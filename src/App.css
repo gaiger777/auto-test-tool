@@ -103,6 +103,15 @@ table.history button { padding: 2px 8px; font-size: 12px; }
 .tree-row button.danger:hover { color: #fff; background: var(--btn-danger); }
 .tree-row button .codicon { font-size: 13px; vertical-align: -1px; }
 
+/* ── 열 리사이저(드래그로 트리 너비 조절) ── */
+.split-row { display: flex; align-items: stretch; }
+.col-resizer {
+  flex: 0 0 6px; cursor: col-resize; align-self: stretch;
+  border-left: 1px solid var(--vsc-border);
+  transition: background 0.1s ease;
+}
+.col-resizer:hover, .col-resizer:active { background: var(--vsc-accent); }
+
 /* 키보드 포커스 링만 표시 (마우스는 숨김) */
 button:focus { outline: none; }
 button:focus-visible,
