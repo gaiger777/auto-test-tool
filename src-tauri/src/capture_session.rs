@@ -206,6 +206,9 @@ pub fn recorder_script(token: &str) -> String {
   }} catch (e) {{ return false; }} }}
   function record(kind, el, value) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
+    // 특정 컨트롤이 아닌 '큰 컨테이너' 클릭(내부에 입력/라디오/버튼이 여럿)은 스킵 — 위치 css로 잡혀 재생 시 오작동.
+    if (kind === "click" && !(el.closest && el.closest(CLICKSEL)) && el.querySelectorAll
+        && el.querySelectorAll("input,button,[role=radio],[role=checkbox],[role=button],a,select,textarea").length > 3) return;
     send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
             value: (value != null ? String(value) : null), href: (kind === "click" ? hrefOf(el) : null),
             url: location.href, timestamp: Date.now() }});
