@@ -17,6 +17,15 @@
   --vsc-danger: #f48771;
   --vsc-ok: #89d185;
   --vsc-focus: #007fd4;
+  /* 버튼 (VS Code Dark+ 톤) */
+  --btn: #3a3d41;             /* 보조 버튼 */
+  --btn-hover: #45494e;
+  --btn-active: #333639;
+  --btn-border: #45494e;
+  --btn-primary: #0e639c;     /* 기본(강조) 버튼 */
+  --btn-primary-hover: #1177bb;
+  --btn-primary-active: #0d5789;
+  --btn-danger: #c74e39;      /* 위험 버튼 채움(hover 시) */
 }
 
 * { box-sizing: border-box; }
@@ -57,20 +66,34 @@ body {
 h2 { font-size: 15px; font-weight: 600; color: var(--vsc-fg-strong); margin: 0 0 12px; }
 h3 { font-size: 13px; font-weight: 600; color: var(--vsc-fg); margin: 16px 0 8px; }
 
-/* ── 버튼 ── */
+/* ── 버튼 (VS Code 톤앤매너) ── */
 button {
-  font-family: inherit; font-size: 13px;
-  background: var(--vsc-bg-alt); color: var(--vsc-fg);
-  border: 1px solid var(--vsc-border-strong); border-radius: 4px;
-  padding: 4px 12px; cursor: pointer;
+  font-family: inherit; font-size: 13px; line-height: 1.35;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  background: var(--btn); color: var(--vsc-fg);
+  border: 1px solid var(--btn-border); border-radius: 3px;
+  padding: 4px 12px; cursor: pointer; white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
-button:hover { background: var(--vsc-hover); }
-button:disabled { opacity: 0.45; cursor: default; }
-button.accent { background: var(--vsc-accent); color: #fff; border-color: var(--vsc-accent); }
-button.accent:hover { background: #0a86dd; }
-button.accent:disabled { background: var(--vsc-accent); }
-button.danger { color: var(--vsc-danger); }
-button.danger:hover { background: var(--vsc-hover); }
+button:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+button:active { background: var(--btn-active); }
+button:disabled { opacity: 0.4; cursor: default; background: var(--btn); border-color: var(--btn-border); }
+
+/* 기본(강조) — 파란 채움 */
+button.accent { background: var(--btn-primary); color: #fff; border-color: var(--btn-primary); }
+button.accent:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
+button.accent:active { background: var(--btn-primary-active); }
+button.accent:disabled { background: var(--btn-primary); border-color: var(--btn-primary); }
+
+/* 위험 — 평소엔 빨간 글자, hover 시 빨간 채움 */
+button.danger { color: var(--vsc-danger); background: var(--btn); border-color: var(--btn-border); }
+button.danger:hover { color: #fff; background: var(--btn-danger); border-color: var(--btn-danger); }
+button.danger:active { background: #b0442f; }
+button.danger:disabled { color: var(--vsc-danger); background: var(--btn); }
+
+/* 조밀 영역(테이블·트리)의 아이콘 버튼은 더 촘촘하게 */
+table.history button { padding: 2px 8px; font-size: 12px; }
+.tree-row button { padding: 1px 7px; font-size: 12px; }
 
 /* 키보드 포커스 링만 표시 (마우스는 숨김) */
 button:focus { outline: none; }
