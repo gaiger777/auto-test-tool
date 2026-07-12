@@ -142,10 +142,28 @@ pub fn recorder_script(token: &str) -> String {
     var tid = el.getAttribute("data-testid") || el.getAttribute("data-test") || el.getAttribute("data-cy");
     if (tid) out.push({{ strategy: "testid", value: tid }});
     if (el.id && stableId(el.id)) out.push({{ strategy: "id", value: el.id }});
-    if (el.getAttribute("name")) out.push({{ strategy: "name", value: el.tagName.toLowerCase() + "[name=" + el.getAttribute("name") + "]" }});
     var role = roleOf(el), nm = nameOf(el);
+    var isRadio = el.tagName === "INPUT" && (el.type === "radio" || el.type === "checkbox");
+    // 라디오/체크박스의 name은 그룹 공용(유일하지 않음) → name 셀렉터 제외.
+    if (el.getAttribute("name") && !isRadio) out.push({{ strategy: "name", value: el.tagName.toLowerCase() + "[name=" + el.getAttribute("name") + "]" }});
     if (role && nm) out.push({{ strategy: "role", value: role + "|" + nm }});
     if (nm && (role === "button" || role === "link")) out.push({{ strategy: "text", value: nm }});
+    // 테이블 행 안의 요소는 위치(nth-of-type)가 아니라 '행 텍스트(가장 긴 셀 = 대개 이름)'로 앵커링
+    // → 정렬·페이징으로 행 위치가 바뀌어도 올바른 행을 찾는다. (css 위치 셀렉터보다 우선)
+    var row = el.closest ? el.closest("tr, [role=row]") : null;
+    if (row) {{
+      var cells = row.querySelectorAll("td, [role=cell], [role=gridcell]");
+      var anchor = "";
+      for (var ci = 0; ci < cells.length; ci++) {{
+        var ct = (cells[ci].textContent || "").trim().replace(/\s+/g, " ");
+        if (ct.length > anchor.length && ct.length <= 60) anchor = ct;
+      }}
+      if (!anchor) anchor = (row.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60);
+      if (anchor) {{
+        var hint = isRadio ? "radio" : (role ? ("role:" + role) : ("tag:" + el.tagName.toLowerCase()));
+        out.push({{ strategy: "rowtext", value: anchor + "|||" + hint }});
+      }}
+    }}
     out.push({{ strategy: "css", value: cssPath(el) }});
     return out;
   }}
@@ -275,6 +293,18 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         for(var i=0;i<all.length;i++){ if(roleOf(all[i])===role && nameOf(all[i])===nm) return all[i]; } return null; }
       if(sel.strategy==="text"){ var els=document.querySelectorAll('a,button,[role=button],summary,label');
         for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
+      if(sel.strategy==="rowtext"){ // "행앵커텍스트|||힌트" → 그 텍스트를 포함하는 행 안에서 타겟을 찾는다
+        var rp=sel.value.split("|||"); var atext=rp[0], hint=rp[1]||"";
+        var rows=document.querySelectorAll('tr, [role=row]');
+        for(var k=0;k<rows.length;k++){
+          if((rows[k].textContent||"").replace(/\s+/g," ").indexOf(atext)<0) continue;
+          if(hint==="radio") return rows[k].querySelector('input[type=radio],input[type=checkbox]') || rows[k];
+          if(hint.indexOf("role:")===0){ var wrole=hint.slice(5); var cs=rows[k].querySelectorAll('a,button,input,select,textarea,[role]');
+            for(var m2=0;m2<cs.length;m2++){ if(roleOf(cs[m2])===wrole) return cs[m2]; } }
+          if(hint.indexOf("tag:")===0){ var t2=rows[k].querySelector(hint.slice(4)); if(t2) return t2; }
+          return rows[k];
+        }
+        return null; }
     }catch(e){}
     return null;
   }
