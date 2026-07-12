@@ -126,6 +126,9 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--vsc-focus); }
 select { cursor: pointer; }
+/* datalist(<input list>)의 오른쪽 드롭다운 화살표 숨김 — 내용 잘림/여백 제거(타이핑 자동완성은 유지) */
+input::-webkit-calendar-picker-indicator { display: none; }
+input[list] { padding-right: 8px; }
 
 /* ── 공용 컴포넌트 ── */
 .two-col { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
