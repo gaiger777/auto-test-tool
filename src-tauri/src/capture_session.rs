@@ -703,6 +703,8 @@ pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result
     let window = WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
         .title("캡처 세션")
         .initialization_script(&script)
+        // 재생 창과 같은 넓이로 열어 사이드바 펼침 상태를 일치시킨다(녹화↔재생 DOM 일관성).
+        .inner_size(1500.0, 950.0)
         // 비영속 세션: 이전 로그인 쿠키를 물고 오지 않게 → 항상 로그아웃 상태(로그인 페이지)에서 기록 시작.
         .incognito(true)
         .build()

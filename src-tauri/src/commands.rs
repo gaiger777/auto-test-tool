@@ -494,6 +494,8 @@ pub fn start_ui_replay(
     tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed))
         .title("UI 재생")
         .initialization_script(&script)
+        // 넓게 열어 좌측 사이드바가 '펼쳐진' 상태로 유지되게 한다(좁으면 접혀서 DOM이 달라져 요소를 못 찾음).
+        .inner_size(1500.0, 950.0)
         // 비영속 세션: 이전 실행의 로그인 쿠키를 물고 와 자동 로그인되는 것을 막는다
         // (로그인 시나리오가 항상 로그아웃 상태에서 시작). 연속 실행은 같은 창을 재사용해 로그인 유지.
         .incognito(true)
