@@ -189,6 +189,16 @@ pub fn recorder_script(token: &str) -> String {
         out.push({{ strategy: "rowtext", value: anchor + "|||" + hint + "|||" + tsg.join("~") + "|||" + tidx }});
       }}
     }}
+    // 사이드바 메뉴: 접힘(아이콘만)/펼침(텍스트) 어느 상태로 녹화·재생해도 찾도록 아이콘+텍스트로 앵커.
+    var menu = el.closest ? el.closest("[role=menuitem], .ant-menu-item, .ant-menu-submenu-title, li.ant-menu-submenu, li.ant-menu-item") : null;
+    if (menu) {{
+      var ic = menu.querySelector(".anticon, [class*=anticon-], svg[class*=icon], [class*=icon]");
+      var iconCls = "";
+      if (ic) {{ var cn = (ic.getAttribute && ic.getAttribute("class")) || ""; var mm = cn.match(/anticon-[\w-]+/) || cn.match(/[\w-]*icon-[\w-]+/); if (mm) iconCls = mm[0]; }}
+      var tcEl = menu.querySelector(".ant-menu-title-content");
+      var mtext = ((tcEl ? tcEl.textContent : menu.textContent) || "").replace(/\s+/g, " ").trim().slice(0, 30);
+      if (iconCls || mtext) out.push({{ strategy: "menu", value: iconCls + "|||" + mtext }});
+    }}
     out.push({{ strategy: "css", value: cssPath(el) }});
     return out;
   }}
@@ -406,6 +416,12 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         return ms[ridx] || ms[0] || null; }
       if(sel.strategy==="text"){ var els=document.querySelectorAll('a,button,[role=button],summary,label');
         for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
+      if(sel.strategy==="menu"){ // "아이콘클래스|||텍스트" → 접힘/펼침 무관하게 사이드바 메뉴 매칭
+        var mp=sel.value.split("|||"); var icon=mp[0], mtext=mp[1]||"";
+        var items=document.querySelectorAll("[role=menuitem], .ant-menu-item, .ant-menu-submenu-title, li.ant-menu-submenu, li.ant-menu-item");
+        if(mtext){ for(var mi=0;mi<items.length;mi++){ var tc=items[mi].querySelector(".ant-menu-title-content"); var t=(tc?tc.textContent:items[mi].textContent||"").replace(/\s+/g," ").trim(); if(t===mtext) return items[mi]; } }
+        if(icon){ for(var mj=0;mj<items.length;mj++){ if(items[mj].querySelector && items[mj].querySelector("[class*='"+icon+"']")) return items[mj]; } }
+        return null; }
       if(sel.strategy==="rowtext"){ // "행앵커|||힌트|||표시그니처|||표index" → (그 표 안에서) 앵커 행의 타겟
         var rp=sel.value.split("|||"); var atext=rp[0], hint=rp[1]||"", tsig=rp[2]||"", tidx=(rp[3]!=null?parseInt(rp[3],10):-1);
         var scopeTbl = findTable(tsig, tidx);
