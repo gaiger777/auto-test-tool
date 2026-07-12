@@ -320,15 +320,26 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   function findTableBySig(tsig){ var ts=document.querySelectorAll("table,[role=table],[role=grid]"); if(!tsig) return ts[0]||null;
     for(var i=0;i<ts.length;i++){ if(tableSigOf(ts[i])===tsig) return ts[i]; }
     var want=tsig.split("~")[0]; for(var j=0;j<ts.length;j++){ if(want && tableSigOf(ts[j]).indexOf(want)>=0) return ts[j]; } return null; }
-  function tableScope(tbl){ var p=tbl; for(var i=0;i<7&&p;i++){ if(p.querySelector && (p.querySelector(".ant-pagination")||p.querySelector("[class*=pagination]"))) return p; p=p.parentElement; } return tbl.parentElement||tbl; }
-  function pagDisabled(btn){ if(!btn) return true; if(btn.disabled) return true; var li=btn.closest("li,[class*=pagination-next],[class*=pagination-prev]"); if(li){ if(li.getAttribute("aria-disabled")==="true") return true; if((li.className||"").indexOf("disabled")>=0) return true; } return false; }
+  var PAG_NEXT=["keyboard_arrow_right","chevron_right","navigate_next","arrow_forward_ios","다음","next"];
+  var PAG_PREV=["keyboard_arrow_left","chevron_left","navigate_before","arrow_back_ios","이전","previous","prev"];
+  function findPagBtnIn(scope, glyph){ if(!scope||!scope.querySelectorAll) return null;
+    var bs=scope.querySelectorAll("button,[role=button],a,li,span,i"); for(var i=0;i<bs.length;i++){ var nm=(nameOf(bs[i])||"").toLowerCase().trim();
+      for(var g=0;g<glyph.length;g++){ if(nm===glyph[g] || nm.indexOf(glyph[g])>=0){ return bs[i].closest("button,[role=button],a,li")||bs[i]; } } } return null; }
+  // 표를 감싸는 '가장 가까운' 페이지네이션 컨트롤 포함 조상. (다른 표의 페이지네이션과 섞이지 않게 최소 범위)
+  function tableScope(tbl){ var p=tbl.parentElement;
+    for(var i=0;i<9&&p;i++){ if(p.querySelector && (p.querySelector(".ant-pagination") || findPagBtnIn(p, PAG_NEXT))) return p; p=p.parentElement; }
+    return tbl.parentElement||tbl; }
+  function pagDisabled(btn){ if(!btn) return true; if(btn.disabled) return true;
+    var li=btn.closest("li,[class*=pagination-next],[class*=pagination-prev]")||btn;
+    if(li.getAttribute && li.getAttribute("aria-disabled")==="true") return true;
+    if(li.className && (""+li.className).indexOf("disabled")>=0) return true; return false; }
   function pagBtn(tbl, kind){ var scope=tableScope(tbl);
     var li=scope.querySelector(kind==="next"?".ant-pagination-next":".ant-pagination-prev"); if(li){ return li.querySelector("button")||li; }
-    var glyph = kind==="next" ? ["keyboard_arrow_right","chevron_right","next",">","›"] : ["keyboard_arrow_left","chevron_left","previous","prev","<","‹"];
-    var btns=scope.querySelectorAll("button,[role=button]");
-    for(var i=0;i<btns.length;i++){ var nm=(nameOf(btns[i])||"").toLowerCase(); for(var g=0;g<glyph.length;g++){ if(nm.indexOf(glyph[g])>=0) return btns[i]; } } return null; }
+    return findPagBtnIn(scope, kind==="next"?PAG_NEXT:PAG_PREV); }
   function rowInScope(root, atext){ var rows=(root||document).querySelectorAll("tr,[role=row]"); for(var i=0;i<rows.length;i++){ if((rows[i].textContent||"").replace(/\s+/g," ").indexOf(atext)>=0) return rows[i]; } return null; }
+  function firstRowText(tbl){ if(!tbl) return ""; var r=tbl.querySelector("tbody tr, tr"); return r?((r.textContent||"").replace(/\s+/g," ").slice(0,60)):""; }
   // rowtext 대상 행이 현재 페이지에 없으면, 그 표를 1페이지부터 넘겨가며 찾는다(데이터 이동/페이지 변화 대응).
+  // 페이지가 더 안 바뀌면(첫 행 텍스트 불변) 중단해 무한 클릭/멈춤을 막는다.
   async function ensureRowVisible(sels){
     var rt=null; for(var i=0;i<sels.length;i++){ if(sels[i].strategy==="rowtext"){ rt=sels[i]; break; } }
     if(!rt) return;
@@ -336,8 +347,14 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(!tsig) return; // 구버전 기록(표 시그니처 없음)은 페이지 탐색 생략
     var tbl=findTableBySig(tsig); if(!tbl) return;
     if(rowInScope(tbl, atext)) return; // 이미 현재 페이지에 있음
-    for(var b=0;b<40;b++){ tbl=findTableBySig(tsig)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break; prev.click(); await sleep(400); await waitNetworkIdle(3000); } // 1페이지로
-    for(var f=0;f<80;f++){ tbl=findTableBySig(tsig)||tbl; if(rowInScope(tbl, atext)) return; var next=pagBtn(tbl,"next"); if(pagDisabled(next)) return; next.click(); await sleep(450); await waitNetworkIdle(3000); }
+    // 1페이지로 되감기
+    for(var b=0;b<40;b++){ tbl=findTableBySig(tsig)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break;
+      var pb=firstRowText(tbl); prev.click(); await sleep(450); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl; if(firstRowText(tbl)===pb) break; }
+    // 앞으로 넘기며 탐색
+    for(var f=0;f<80;f++){ tbl=findTableBySig(tsig)||tbl; if(rowInScope(tbl, atext)) return;
+      var next=pagBtn(tbl,"next"); if(pagDisabled(next)) return;
+      var fb=firstRowText(tbl); next.click(); await sleep(500); await waitNetworkIdle(3000); tbl=findTableBySig(tsig)||tbl;
+      if(firstRowText(tbl)===fb) return; } // 페이지 안 바뀜 → 중단
   }
   function bySel(sel){
     try{
@@ -387,7 +404,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   // 셀렉터 목록에서 '액션 가능한(보이고 enabled)' 첫 요소를 찾는다.
   // 앞 셀렉터가 숨겨진 요소(예: role:tooltip)를 가리켜도 멈추지 않고 다음 셀렉터(css 등)로 폴백한다.
   function resolveActionable(sels, lenient){
+    // rowtext(표 행 앵커)가 있으면 위치 기반 css 폴백은 제외 — 다른 페이지/정렬에서 엉뚱한 행을 고를 수 있다.
+    var hasRow=false; for(var k=0;k<sels.length;k++){ if(sels[k].strategy==="rowtext"){ hasRow=true; break; } }
     for(var i=0;i<sels.length;i++){
+      if(hasRow && sels[i].strategy==="css") continue;
       var el=bySel(sels[i]);
       if(!el || el.disabled) continue;
       try{ el.scrollIntoView({block:"center", inline:"nearest"}); }catch(e){}
