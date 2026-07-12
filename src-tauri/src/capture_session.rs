@@ -156,17 +156,24 @@ pub fn recorder_script(token: &str) -> String {
       out.push({{ strategy: "role", value: role + "|" + nm }});
     }}
     if (nm && (role === "button" || role === "link")) out.push({{ strategy: "text", value: nm }});
-    // 테이블 행 안의 요소는 위치(nth-of-type)가 아니라 '행 텍스트(가장 긴 셀 = 대개 이름)'로 앵커링
-    // → 정렬·페이징으로 행 위치가 바뀌어도 올바른 행을 찾는다. (css 위치 셀렉터보다 우선)
+    // 테이블 행 안의 요소는 위치(nth-of-type)가 아니라 '행을 식별하는 텍스트'로 앵커링한다.
+    // 중요: '2.0 GiB' 같이 여러 행에 공통인 값은 앵커로 못 쓴다 → 표 안에서 '유니크한' 셀 중
+    // 가장 긴 것을 앵커로 고른다(대개 이름 컬럼). 정렬·페이징으로 위치가 바뀌어도 올바른 행 매칭.
     var row = el.closest ? el.closest("tr, [role=row]") : null;
     if (row) {{
-      var cells = row.querySelectorAll("td, [role=cell], [role=gridcell]");
+      var tbl = row.closest("table, [role=table], [role=grid]") || row.parentElement;
+      var siblingRows = tbl ? tbl.querySelectorAll("tr, [role=row]") : [row];
+      function normTxt(n) {{ return (n.textContent || "").replace(/\s+/g, " ").trim(); }}
+      var cells = row.querySelectorAll("td, th, [role=cell], [role=gridcell]");
       var anchor = "";
       for (var ci = 0; ci < cells.length; ci++) {{
-        var ct = (cells[ci].textContent || "").trim().replace(/\s+/g, " ");
-        if (ct.length > anchor.length && ct.length <= 60) anchor = ct;
+        var ct = normTxt(cells[ci]);
+        if (!ct || ct.length > 60 || ct.length <= anchor.length) continue;
+        var cnt = 0;
+        for (var si = 0; si < siblingRows.length; si++) {{ if (normTxt(siblingRows[si]).indexOf(ct) >= 0) cnt++; }}
+        if (cnt === 1) anchor = ct; // 이 표에서 이 셀 텍스트를 가진 행이 하나뿐 → 유니크
       }}
-      if (!anchor) anchor = (row.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60);
+      if (!anchor) anchor = normTxt(row).slice(0, 80); // 유니크 셀이 없으면 행 전체 텍스트
       if (anchor) {{
         var hint = isRadio ? "radio" : (role ? ("role:" + role) : ("tag:" + el.tagName.toLowerCase()));
         out.push({{ strategy: "rowtext", value: anchor + "|||" + hint }});
