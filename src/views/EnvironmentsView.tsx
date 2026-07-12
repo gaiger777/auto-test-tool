@@ -20,14 +20,10 @@ export default function EnvironmentsView() {
   const [hosts, setHosts] = useState<HostRow[]>([{ id: 0, v: '' }])
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState('')
-  // 이 화면의 로그 대상(화면별 독립, localStorage로 탭 전환에도 지속). 러너 선택과 무관.
-  const [logEnvId, setLogEnvId] = useState<number | null>(() => {
-    const s = localStorage.getItem('env.logEnvId'); return s ? Number(s) : null
-  })
-  const setLog = (id: number | null) => {
-    setLogEnvId(id)
-    if (id == null) localStorage.removeItem('env.logEnvId'); else localStorage.setItem('env.logEnvId', String(id))
-  }
+  // 로그 대상 = 실제 연결된 MQ 세션을 따라간다(앱 시작 시 자동 연결하지 않음).
+  // 탭 전환 시에도 전역 mqSession이 연결을 유지하므로 재마운트해도 상태가 복원된다.
+  const [logEnvId, setLogEnvId] = useState<number | null>(() => mqSession.getEnvId())
+  const setLog = (id: number | null) => setLogEnvId(id)
   const connectedEnv = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
   const nextId = useRef(1)
   const mkRows = (vals: string[]): HostRow[] =>
@@ -39,10 +35,6 @@ export default function EnvironmentsView() {
   }).catch(e => setError(String(e)))
   useEffect(() => {
     reload()
-    // 화면 진입 시 저장된 로그 대상이 있고 아직 그 환경에 연결돼 있지 않으면 자동 연결.
-    if (logEnvId != null && mqSession.getEnvId() !== logEnvId) {
-      mqSession.start(logEnvId).catch(e => setError('RabbitMQ 연결 실패: ' + String(e)))
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

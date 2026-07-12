@@ -59,10 +59,7 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
   useEffect(() => {
     reloadFlows()
     api.listEnvironments().then(setEnvs).catch(() => {})
-    // 앱 시작 시 저장된 환경 선택이 있으면 자동 연결해 연결/바인딩 정보를 바로 보여준다.
-    if (envId != null && mqSession.getEnvId() !== envId) {
-      mqSession.start(envId).catch(e => setError('MQ 연결 실패: ' + String(e)))
-    }
+    // (앱 시작 시 MQ 자동 연결하지 않음 — 사용자가 환경 선택 후 ▶ 로그를 눌러야 연결)
     const h = () => reloadFlows() // 레코더에서 DB 저장 시 자동 갱신
     window.addEventListener('ui-flows-changed', h)
     // 상시 마운트(display 토글)라 환경 추가/수정 시 이벤트로 드롭다운 갱신
@@ -126,13 +123,17 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     try { await api.renameUiGroup(site, oldGroup, newGroup); await reloadFlows(); window.dispatchEvent(new CustomEvent('ui-flows-changed')) } catch (e) { setError(String(e)) }
   }
 
+  // 선택만 바꾼다(연결은 ▶ 로그 또는 실행 시). 다른 환경을 고르면 기존 로그는 중단.
   const changeEnv = async (v: number | null) => {
     setError(''); setEnv(v)
-    try {
-      if (v != null) await mqSession.start(v)
-      else await mqSession.stop()
-    } catch (e) { setError('MQ 연결 실패: ' + String(e)) }
+    if (mqSession.getEnvId() != null && mqSession.getEnvId() !== v) { try { await mqSession.stop() } catch { /* noop */ } }
   }
+  const startLog = async () => {
+    if (envId == null) return
+    setError('')
+    try { await mqSession.start(envId) } catch (e) { setError('RabbitMQ 연결 실패: ' + String(e)) }
+  }
+  const stopLog = async () => { try { await mqSession.stop() } catch { /* noop */ } }
 
   const move = (i: number, d: -1 | 1) => {
     const j = i + d
@@ -221,8 +222,9 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
           {envs.map(en => <option key={en.id} value={en.id!}>{en.name}</option>)}
         </select>
         {envId != null && (connectedEnv === envId
-          ? <span className="dim">RabbitMQ 연결됨</span>
-          : <span className="dim">연결 대기(실행 시 연결)</span>)}
+          ? <button className="danger" onClick={stopLog} disabled={busy}>■ 로그 중단</button>
+          : <button onClick={startLog} disabled={busy}>▶ 로그</button>)}
+        {envId != null && connectedEnv !== envId && <span className="dim">연결 안 됨(실행 시 자동 연결)</span>}
         <span style={{ flex: 1 }} />
         <button onClick={reloadFlows} disabled={busy}>트리 새로고침</button>
         <button onClick={doExport} disabled={busy}>DB 내보내기</button>
