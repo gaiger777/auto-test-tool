@@ -379,9 +379,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     // 앞으로 넘기며 탐색
     for(var f=0;f<80;f++){ tbl=findTable(tsig,tidx)||tbl; if(rowInScope(tbl, atext)){ window.__rowDiag=pages+"p째에서찾음"; return; }
       var next=pagBtn(tbl,"next"); if(pagDisabled(next)){ window.__rowDiag="다음버튼없음/비활성·"+pages+"p"; return; }
-      var bn=(nameOf(next)||next.tagName||"?").slice(0,16);
+      var bh=(next.outerHTML||"").replace(/[<>]/g,function(c){return c==="<"?"‹":"›";}).replace(/\s+/g," ").slice(0,140);
       var fb=firstRowText(tbl); robustClick(next); await sleep(600); await waitNetworkIdle(3000); tbl=findTable(tsig,tidx)||tbl; pages++;
-      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜(btn:"+bn+")·"+pages+"p"; return; } }
+      if(firstRowText(tbl)===fb){ window.__rowDiag="페이지안바뀜·btn["+bh+"]"; return; } }
     window.__rowDiag="끝까지없음·"+pages+"p";
   }
   function bySel(sel){
