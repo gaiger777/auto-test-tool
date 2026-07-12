@@ -49,7 +49,10 @@ export default function EnvironmentsView() {
 
   const setHost = (id: number, v: string) => setHosts(rows => rows.map(r => (r.id === id ? { ...r, v } : r)))
   const addHost = () => setHosts(rows => [...rows, { id: nextId.current++, v: '' }])
-  const delHost = (id: number) => setHosts(rows => (rows.length > 1 ? rows.filter(r => r.id !== id) : rows))
+  const delHost = (id: number) => {
+    if (!window.confirm('이 호스트를 삭제하시겠습니까?')) return
+    setHosts(rows => (rows.length > 1 ? rows.filter(r => r.id !== id) : rows))
+  }
 
   const save = async () => {
     setError('')
