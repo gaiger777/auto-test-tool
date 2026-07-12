@@ -33,6 +33,7 @@ export default function CaptureView() {
   const [notice, setNotice] = useState('')
   const [modalCalls, setModalCalls] = useState<{ title: string; calls: CallLike[] } | null>(null)
   const tree = useColumnWidth('capture.treeW', 280)
+  const [posEdits, setPosEdits] = useState<Record<string, string>>({}) // action id → 입력 중인 순번
   const startedAt = useRef(0)
   const envIdRef = useRef<number | null>(null)
   useEffect(() => { envIdRef.current = envId }, [envId])
@@ -141,6 +142,20 @@ export default function CaptureView() {
     const j = i + d
     if (j < 0 || j >= uiActions.length) return
     setUiActions(a => { const n = [...a]; [n[i], n[j]] = [n[j], n[i]]; return n }); setReplayResults({})
+  }
+  // 번호 입력으로 해당 위치로 이동(나머지 한 칸씩 밀림)
+  const moveUiTo = (from: number, toPos: number) => {
+    setUiActions(a => {
+      const to = Math.max(0, Math.min(a.length - 1, (toPos || 0) - 1))
+      if (Number.isNaN(to) || to === from) return a
+      const n = [...a]; const [x] = n.splice(from, 1); n.splice(to, 0, x); return n
+    })
+    setReplayResults({})
+  }
+  const applyActPos = (id: string, from: number) => {
+    const v = posEdits[id]
+    if (v != null && v !== '') moveUiTo(from, Number(v))
+    setPosEdits(p => { const n = { ...p }; delete n[id]; return n })
   }
 
   const doImport = async () => {
@@ -314,7 +329,11 @@ export default function CaptureView() {
                 const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
                 return (
                   <tr key={a.id}>
-                    <td>{i + 1}</td>
+                    <td><input value={posEdits[a.id] ?? String(i + 1)} disabled={replaying}
+                      onChange={e => setPosEdits(p => ({ ...p, [a.id]: e.target.value.replace(/[^0-9]/g, '') }))}
+                      onKeyDown={e => { if (e.key === 'Enter') { applyActPos(a.id, i); (e.target as HTMLInputElement).blur() } }}
+                      onBlur={() => applyActPos(a.id, i)}
+                      style={{ width: 42, textAlign: 'center', padding: '2px 4px' }} title="번호 입력 후 Enter — 이 위치로 이동" /></td>
                     <td>{kindLabel(a.kind)}</td>
                     <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</td>
                     <td className="dim" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
