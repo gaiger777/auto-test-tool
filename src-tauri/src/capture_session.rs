@@ -191,9 +191,12 @@ pub fn recorder_script(token: &str) -> String {
   // 이름으로 찾으며 필요한 만큼 페이지를 자동으로 넘긴다.
   function isPagination(el) {{ try {{
     if (!el || !el.closest) return false;
-    if (el.closest(".ant-pagination, [class*=pagination], [class*=Pagination], nav[aria-label*=age]")) return true;
-    var nm = (nameOf(el) || "").toLowerCase();
-    return /keyboard_arrow_right|keyboard_arrow_left|chevron_right|chevron_left|first_page|last_page/.test(nm);
+    // ant-design 페이지네이션 컨테이너 안이거나, 이름이 '정확히' 페이지 이동 아이콘일 때만.
+    if (el.closest(".ant-pagination")) return true;
+    var nm = (nameOf(el) || "").trim().toLowerCase();
+    return nm === "keyboard_arrow_right" || nm === "keyboard_arrow_left"
+        || nm === "chevron_right" || nm === "chevron_left"
+        || nm === "first_page" || nm === "last_page";
   }} catch (e) {{ return false; }} }}
   function record(kind, el, value) {{
     if (!el || el.nodeType !== 1 || el.tagName === "HTML" || el.tagName === "BODY") return;
