@@ -13,10 +13,11 @@ interface Props {
   onRenameFlow?: (f: UiFlowRecord, newName: string) => void
   onRenameGroup?: (siteUrl: string, oldGroup: string, newGroup: string) => void
   onDelete?: (flows: UiFlowRecord[], label: string) => void
+  onPickSite?: (siteUrl: string) => void // URL 클릭 시(예: 레코더 대상 URL 채우기)
 }
 
 // URL → 그룹 → 시나리오 트리. 리프 클릭은 onPickFlow, URL/그룹의 ▶ 는 onPickMany, ✎ 는 인라인 이름 변경.
-export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup, onDelete }: Props) {
+export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, onRenameFlow, onRenameGroup, onDelete, onPickSite }: Props) {
   const tree = useMemo(() => {
     const bySite = new Map<string, Map<string, UiFlowRecord[]>>()
     for (const f of flows) {
@@ -68,7 +69,9 @@ export default function FlowTree({ flows, selectedId, onPickFlow, onPickMany, on
             <div className="tree-row" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
               <button onClick={() => toggle(siteKey)} title="펼치기/접기" style={{ padding: '0 4px' }}>{siteOpen ? '▾' : '▸'}</button>
               <span className="codicon codicon-globe" aria-hidden="true" />
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={site}>{site}</span>
+              <span onClick={onPickSite ? () => onPickSite(site) : undefined}
+                style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: onPickSite ? 'pointer' : 'default' }}
+                title={onPickSite ? '클릭: 이 URL을 대상 입력칸에 넣기' : site}>{site}</span>
               {onPickMany && <button onClick={() => onPickMany(siteFlows, site)} title="이 사이트 전체 불러오기">▶</button>}
               {onDelete && <button className="danger" onClick={() => onDelete(siteFlows, site)} title="이 URL 전체 삭제"><span className="codicon codicon-trash" aria-hidden="true" /></button>}
             </div>
