@@ -432,6 +432,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         report(i, "delegate", JSON.stringify({ name: a.name, step: a.step||{} }));
         return; // 일시정지 — 프론트가 백엔드로 실행 후 이어감
       }
+      // 비활성(disabled) 버튼 클릭은 무효 동작 → 건너뜀. (예: 마지막 페이지에서 '다음'을 더 누른 기록)
+      // 짧게 기다려 활성화되는지 확인하고, 그래도 비활성이면 실패가 아니라 스킵으로 처리한다.
+      if(a.kind==="click"){
+        var pb=resolve(a.selectors);
+        if(pb && pb.disabled){ await sleep(800); pb=resolve(a.selectors);
+          if(pb && pb.disabled){ stepReport(i, "passed", "비활성 버튼 건너뜀: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(i+1)); continue; } }
+      }
       // 대기: 링크 클릭은 짧게(href 폴백), 호버는 짧게(실패해도 건너뜀), 그 외 넉넉히.
       var waitMs = a.kind==="hover" ? 3000 : ((a.kind==="click" && a.href) ? 3500 : 8000);
       // B) 호버 유지 중 클릭은 opacity:0/visibility:hidden 로 노출되는 대상도 통과시킨다.
