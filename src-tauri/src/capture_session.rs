@@ -322,18 +322,26 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(!(r.width>0 && r.height>0)) return false;
     if(lenient) return true;
     return st.visibility!=="hidden" && parseFloat(st.opacity||"1")>0.01; }
+  // 셀렉터 목록에서 '액션 가능한(보이고 enabled)' 첫 요소를 찾는다.
+  // 앞 셀렉터가 숨겨진 요소(예: role:tooltip)를 가리켜도 멈추지 않고 다음 셀렉터(css 등)로 폴백한다.
+  function resolveActionable(sels, lenient){
+    for(var i=0;i<sels.length;i++){
+      var el=bySel(sels[i]);
+      if(!el || el.disabled) continue;
+      try{ el.scrollIntoView({block:"center", inline:"nearest"}); }catch(e){}
+      if(isVisible(el, lenient)) return el;
+    }
+    return null;
+  }
   async function waitActionable(sels, maxMs, lenient){
-    var t=0, lastRect=null;
+    var t=0, last=null, lastRect=null;
     while(t<maxMs){
-      var el=resolve(sels);
-      if(el && !el.disabled){
-        try{ el.scrollIntoView({block:"center", inline:"nearest"}); }catch(e){}
-        if(isVisible(el, lenient)){
-          var r=el.getBoundingClientRect();
-          if(lastRect && Math.abs(r.top-lastRect.top)<2 && Math.abs(r.left-lastRect.left)<2) return el;
-          lastRect=r;
-        } else lastRect=null;
-      } else lastRect=null;
+      var el=resolveActionable(sels, lenient);
+      if(el){
+        var r=el.getBoundingClientRect();
+        if(last===el && lastRect && Math.abs(r.top-lastRect.top)<2 && Math.abs(r.left-lastRect.left)<2) return el;
+        last=el; lastRect=r;
+      } else { last=null; lastRect=null; }
       await sleep(120); t+=120;
     }
     return null;
