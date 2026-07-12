@@ -281,8 +281,14 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   function resolve(sels){ for(var i=0;i<sels.length;i++){ var el=bySel(sels[i]); if(el) return el; } return null; }
   // lenient=true: hover로 노출되는 요소 대응 — DOM에 존재하고 박스가 있으면(display:none만 제외)
   // opacity:0 / visibility:hidden 이어도 통과시킨다. 프로그램적 .click()은 이런 상태에서도 동작한다.
-  function isVisible(el, lenient){ if(!el) return false; var r=el.getBoundingClientRect(); var st=getComputedStyle(el);
+  function isRadioLike(el){ return el && el.tagName==="INPUT" && (el.type==="radio"||el.type==="checkbox"); }
+  function isVisible(el, lenient){ if(!el) return false; var st=getComputedStyle(el);
     if(st.display==="none") return false;
+    // 라디오/체크박스: ant-design 등은 실제 input을 opacity:0/0크기로 숨김 → 감싼 라벨/셀의 표시로 판단.
+    if(isRadioLike(el)){ var w=el.closest("label,.ant-radio-wrapper,.ant-checkbox-wrapper,td,li")||el;
+      var wr=w.getBoundingClientRect(); var ws=getComputedStyle(w);
+      return wr.width>0 && wr.height>0 && ws.display!=="none" && ws.visibility!=="hidden"; }
+    var r=el.getBoundingClientRect();
     if(!(r.width>0 && r.height>0)) return false;
     if(lenient) return true;
     return st.visibility!=="hidden" && parseFloat(st.opacity||"1")>0.01; }
@@ -335,7 +341,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     else {
       // 호버가 유지 중이면 클릭 대상 자신에도 hover를 얹어(중첩 메뉴 대응) 클릭한다.
       if(__hoverTimer){ pushHover(el); await sleep(60); }
-      el.click();
+      // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
+      var radio = isRadioLike(el) ? el : (el.querySelector ? el.querySelector('input[type=radio],input[type=checkbox]') : null);
+      if(radio){ radio.click(); } else { el.click(); }
     }
   }
   // 프로그램 스텝 값 치환: 직전 http_call 응답을 {{status}}/{{body}}로 참조 가능.
