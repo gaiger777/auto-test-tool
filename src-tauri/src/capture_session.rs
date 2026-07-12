@@ -354,7 +354,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     for(var c=0;c<cands.length;c++){ var r=cands[c].getBoundingClientRect(); if(r.top<tr.top-5) continue; var d=r.top-tr.bottom; if(d<0) d=Math.abs(d); if(d<bd){ bd=d; best=cands[c]; } }
     return best || cands[0]; }
   function rowInScope(root, atext){ var rows=(root||document).querySelectorAll("tr,[role=row]"); for(var i=0;i<rows.length;i++){ if((rows[i].textContent||"").replace(/\s+/g," ").indexOf(atext)>=0) return rows[i]; } return null; }
-  function firstRowText(tbl){ if(!tbl) return ""; var r=tbl.querySelector("tbody tr, tr"); return r?((r.textContent||"").replace(/\s+/g," ").slice(0,60)):""; }
+  // 첫 '데이터' 행 텍스트(헤더 행 제외). div 그리드([role=row])도 지원 → 페이지 변화 감지에 사용.
+  function firstRowText(tbl){ if(!tbl) return ""; var rows=tbl.querySelectorAll("tr,[role=row]");
+    for(var i=0;i<rows.length;i++){ if(rows[i].querySelector && rows[i].querySelector("th,[role=columnheader]")) continue;
+      var t=(rows[i].textContent||"").replace(/\s+/g," ").trim(); if(t) return t.slice(0,80); } return ""; }
   // rowtext 대상 행이 현재 페이지에 없으면, 그 표를 1페이지부터 넘겨가며 찾는다(데이터 이동/페이지 변화 대응).
   // 페이지가 더 안 바뀌면(첫 행 텍스트 불변) 중단해 무한 클릭/멈춤을 막는다.
   async function ensureRowVisible(sels){
