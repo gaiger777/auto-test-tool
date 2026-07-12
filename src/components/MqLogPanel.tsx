@@ -11,7 +11,8 @@ export default function MqLogPanel({ height = 200, onConnected, storageKey = 'de
   const { rows, connectSeq } = useSyncExternalStore(mqLog.subscribe, mqLog.getSnapshot)
   const [detail, setDetail] = useState<LogRow | null>(null)
   const exKey = `mqlog.exclude.${storageKey}`
-  const [exclude, setExclude] = useState(() => localStorage.getItem(exKey) ?? '')
+  const [exclude, setExclude] = useState(() => localStorage.getItem(exKey) ?? '') // 적용된 필터
+  const [draft, setDraft] = useState(exclude) // 입력 중인 값(적용 버튼/Enter로만 반영)
   const boxRef = useRef<HTMLDivElement>(null)
 
   // 연결 성공 시 상위 경고 제거 (마운트 이후 새 연결에만 반응)
@@ -20,7 +21,7 @@ export default function MqLogPanel({ height = 200, onConnected, storageKey = 'de
     if (connectSeq !== seqRef.current) { seqRef.current = connectSeq; onConnected?.() }
   }, [connectSeq, onConnected])
 
-  const changeExclude = (v: string) => { setExclude(v); localStorage.setItem(exKey, v) }
+  const applyExclude = () => { setExclude(draft); localStorage.setItem(exKey, draft) }
   const excludeTerms = exclude.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
   const isInfo = (et: string) => et.startsWith('(')
   const visible = rows.filter(r => isInfo(r.event_type) || !excludeTerms.some(t => r.event_type.toLowerCase().includes(t)))
@@ -35,8 +36,10 @@ export default function MqLogPanel({ height = 200, onConnected, storageKey = 'de
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 13 }}>RabbitMQ 로그 ({visible.length}/{rows.length})</strong>
         <button onClick={() => mqLog.clear()} disabled={!rows.length}>지우기</button>
-        <input value={exclude} onChange={e => changeExclude(e.target.value)}
+        <input value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') applyExclude() }}
           placeholder="제외할 event_type (쉼표, 예: identity.authenticate)" style={{ minWidth: 300, fontSize: 12 }} />
+        <button onClick={applyExclude} disabled={draft === exclude}>적용</button>
         <span className="dim" style={{ fontSize: 11 }}>행 클릭 = JSON 상세</span>
       </div>
       <div ref={boxRef} style={{

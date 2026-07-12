@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import * as api from '../api'
 import { correlateCalls, type CapturedCall } from '../capture'
 import { runDelegatedStep } from '../replayDelegate'
+import { mqSession } from '../mqLog'
+import MqLogPanel from '../components/MqLogPanel'
 import { kindLabel, stepSummary } from '../uiStep'
 import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import ProgStepAdder from '../components/ProgStepAdder'
@@ -30,6 +32,15 @@ export default function CaptureView() {
   const startedAt = useRef(0)
   const envIdRef = useRef<number | null>(null)
   useEffect(() => { envIdRef.current = envId }, [envId])
+  const connectedEnv = useSyncExternalStore(mqSession.subscribe, mqSession.getEnvId)
+
+  // 이 화면의 RabbitMQ 로그(연결은 전역 1개 — 마지막에 켠 화면이 소유)
+  const startLog = async () => {
+    if (envId == null) { setError('환경을 먼저 선택하세요'); return }
+    setError('')
+    try { await mqSession.start(envId) } catch (e) { setError('RabbitMQ 연결 실패: ' + String(e)) }
+  }
+  const stopLog = async () => { try { await mqSession.stop() } catch { /* noop */ } }
   const replayingRef = useRef(false)
   useEffect(() => { replayingRef.current = replaying }, [replaying])
 
@@ -259,10 +270,13 @@ export default function CaptureView() {
             </button>
             {replaying && <button className="danger" onClick={cancelReplay}>취소</button>}
             <select value={envId ?? ''} onChange={e => setEnvId(e.target.value ? Number(e.target.value) : null)}
-              disabled={replaying} title="wait_event 스텝용 MQ 환경">
+              disabled={replaying} title="wait_event 스텝·RabbitMQ 로그용 환경">
               <option value="">환경 없음</option>
               {envs.map(en => <option key={en.id} value={en.id!}>{en.name}</option>)}
             </select>
+            {envId != null && (connectedEnv === envId
+              ? <button className="danger" onClick={stopLog}>■ 로그 중단</button>
+              : <button onClick={startLog}>▶ 로그</button>)}
           </h3>
           <div className="add-row">
             <input placeholder="그룹 (예: 로그인)" value={group} onChange={e => setGroup(e.target.value)} list="grp-list" style={{ width: 140 }} />
@@ -309,6 +323,8 @@ export default function CaptureView() {
       </div>
 
       {modalCalls && <ApiCallsModal title={modalCalls.title} calls={modalCalls.calls} onClose={() => setModalCalls(null)} />}
+
+      {envId != null && <MqLogPanel storageKey="capture" onConnected={() => setError('')} />}
     </div>
   )
 }
