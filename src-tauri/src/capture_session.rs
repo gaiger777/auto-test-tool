@@ -343,17 +343,20 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     var li=btn.closest("li,[class*=pagination-next],[class*=pagination-prev]")||btn;
     if(li.getAttribute && li.getAttribute("aria-disabled")==="true") return true;
     if(li.className && (""+li.className).indexOf("disabled")>=0) return true; return false; }
-  function pagBtn(tbl, kind){ var scope=tableScope(tbl);
+  function pagBtn(tbl, kind){ var scope=tableScope(tbl); var cands=[];
     // ant-design: 클릭 핸들러는 <li class=ant-pagination-next>에 있다(내부 button은 tabindex=-1 비활성).
-    var li=scope.querySelector(kind==="next"?".ant-pagination-next":".ant-pagination-prev"); if(li){ return li; }
-    // 후보(같은 이름 아이콘)를 모두 모아, 표 바로 아래에서 가장 가까운 것을 고른다(다중 표 구분).
-    var glyph = kind==="next"?PAG_NEXT:PAG_PREV; var cands=[]; var bs=scope.querySelectorAll("button,[role=button],a,li,span,i");
-    for(var i=0;i<bs.length;i++){ var nm=(nameOf(bs[i])||"").toLowerCase().trim();
-      for(var g=0;g<glyph.length;g++){ if(nm===glyph[g]||nm.indexOf(glyph[g])>=0){ var b=bs[i].closest("button,[role=button],a,li")||bs[i]; if(cands.indexOf(b)<0) cands.push(b); break; } } }
+    var lis=scope.querySelectorAll(kind==="next"?".ant-pagination-next":".ant-pagination-prev");
+    for(var i=0;i<lis.length;i++) if(cands.indexOf(lis[i])<0) cands.push(lis[i]);
+    // 아이콘 이름으로도 후보 수집(ant이 아닐 때).
+    var glyph = kind==="next"?PAG_NEXT:PAG_PREV; var bs=scope.querySelectorAll("button,[role=button],a,li,span,i");
+    for(var j=0;j<bs.length;j++){ var nm=(nameOf(bs[j])||"").toLowerCase().trim();
+      for(var g=0;g<glyph.length;g++){ if(nm===glyph[g]||nm.indexOf(glyph[g])>=0){ var b=bs[j].closest("li.ant-pagination-next,li.ant-pagination-prev,button,[role=button],a,li")||bs[j]; if(cands.indexOf(b)<0) cands.push(b); break; } } }
     if(!cands.length) return null;
+    // 보이는 것 중, 대상 표에서 가장 가까운(아래) 것 선택 — 숨겨진/다른 표의 페이지네이션 제외.
     var tr=tbl.getBoundingClientRect(); var best=null, bd=1e9;
-    for(var c=0;c<cands.length;c++){ var r=cands[c].getBoundingClientRect(); if(r.top<tr.top-5) continue; var d=r.top-tr.bottom; if(d<0) d=Math.abs(d); if(d<bd){ bd=d; best=cands[c]; } }
-    return best || cands[0]; }
+    for(var c=0;c<cands.length;c++){ if(!isVisible(cands[c], true)) continue; var r=cands[c].getBoundingClientRect();
+      var d=Math.abs(r.top - tr.bottom); if(r.top < tr.top-5) d+=100000; if(d<bd){ bd=d; best=cands[c]; } }
+    return best; }
   function rowInScope(root, atext){ var rows=(root||document).querySelectorAll("tr,[role=row]"); for(var i=0;i<rows.length;i++){ if((rows[i].textContent||"").replace(/\s+/g," ").indexOf(atext)>=0) return rows[i]; } return null; }
   // 커스텀 페이지네이션 버튼 대응: 단순 .click()이 안 먹는 경우를 위해 전체 이벤트 시퀀스를 쏜다.
   function robustClick(el){ if(!el) return; try{ el.scrollIntoView({block:"center"}); }catch(e){}
