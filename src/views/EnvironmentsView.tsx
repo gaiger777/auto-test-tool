@@ -33,7 +33,10 @@ export default function EnvironmentsView() {
   const mkRows = (vals: string[]): HostRow[] =>
     (vals.length ? vals : ['']).map(v => ({ id: nextId.current++, v }))
 
-  const reload = () => api.listEnvironments().then(setEnvs).catch(e => setError(String(e)))
+  const reload = () => api.listEnvironments().then(list => {
+    setEnvs(list)
+    window.dispatchEvent(new CustomEvent('environments-changed')) // 레코더/스위트 드롭다운 갱신
+  }).catch(e => setError(String(e)))
   useEffect(() => {
     reload()
     // 화면 진입 시 저장된 로그 대상이 있고 아직 그 환경에 연결돼 있지 않으면 자동 연결.

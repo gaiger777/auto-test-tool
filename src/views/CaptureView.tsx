@@ -58,9 +58,13 @@ export default function CaptureView() {
     })
     const onFlows = () => reloadFlows()
     window.addEventListener('ui-flows-changed', onFlows)
+    // 이 화면은 상시 마운트(display 토글)라 환경 추가/수정 시 이벤트로 드롭다운 갱신
+    const onEnvs = () => api.listEnvironments().then(setEnvs).catch(() => {})
+    window.addEventListener('environments-changed', onEnvs)
     return () => {
       unRec.then(u => u()); unUi.then(u => u()); unReplay.then(u => u()); unEnd.then(u => u())
       window.removeEventListener('ui-flows-changed', onFlows)
+      window.removeEventListener('environments-changed', onEnvs)
     }
   }, [])
 

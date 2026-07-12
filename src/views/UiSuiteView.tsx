@@ -65,7 +65,13 @@ export default function UiSuiteView({ active }: { active?: boolean }) {
     }
     const h = () => reloadFlows() // 레코더에서 DB 저장 시 자동 갱신
     window.addEventListener('ui-flows-changed', h)
-    return () => { window.removeEventListener('ui-flows-changed', h) }
+    // 상시 마운트(display 토글)라 환경 추가/수정 시 이벤트로 드롭다운 갱신
+    const onEnvs = () => api.listEnvironments().then(setEnvs).catch(() => {})
+    window.addEventListener('environments-changed', onEnvs)
+    return () => {
+      window.removeEventListener('ui-flows-changed', h)
+      window.removeEventListener('environments-changed', onEnvs)
+    }
     // MQ 세션은 전역 유지(탭 전환에도 로그·연결 보존) — 언마운트에서 끊지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
