@@ -174,9 +174,13 @@ pub fn recorder_script(token: &str) -> String {
         if (cnt === 1) anchor = ct; // 이 표에서 이 셀 텍스트를 가진 행이 하나뿐 → 유니크
       }}
       if (!anchor) anchor = normTxt(row).slice(0, 80); // 유니크 셀이 없으면 행 전체 텍스트
+      // 표 식별자: 헤더 컬럼명 시그니처 (화면에 표가 여러 개일 때 구분 + 재생 시 그 표만 페이지 탐색)
+      var ths = tbl ? tbl.querySelectorAll("th, [role=columnheader]") : [];
+      var tsg = [];
+      for (var ti = 0; ti < ths.length && tsg.length < 6; ti++) {{ var tx = normTxt(ths[ti]); if (tx) tsg.push(tx.slice(0, 20)); }}
       if (anchor) {{
         var hint = isRadio ? "radio" : (role ? ("role:" + role) : ("tag:" + el.tagName.toLowerCase()));
-        out.push({{ strategy: "rowtext", value: anchor + "|||" + hint }});
+        out.push({{ strategy: "rowtext", value: anchor + "|||" + hint + "|||" + tsg.join("~") }});
       }}
     }}
     out.push({{ strategy: "css", value: cssPath(el) }});
@@ -298,6 +302,30 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   function nameOf(el){ var a=(el.getAttribute("aria-label")||"").trim(); if(a) return a;
     if(el.tagName==="INPUT"||el.tagName==="TEXTAREA"||el.tagName==="SELECT") return (el.getAttribute("placeholder")||el.getAttribute("name")||(el.labels&&el.labels[0]&&el.labels[0].textContent)||"").trim().slice(0,60);
     return vtext(el).slice(0,60) || (el.value||""); }
+  // ── 표(테이블) 헬퍼: 시그니처로 표 식별, 페이지 넘김 ──
+  function tableSigOf(t){ if(!t) return ""; var ths=t.querySelectorAll("th,[role=columnheader]"); var ps=[]; for(var i=0;i<ths.length&&ps.length<6;i++){ var x=(ths[i].textContent||"").replace(/\s+/g," ").trim(); if(x) ps.push(x.slice(0,20)); } return ps.join("~"); }
+  function findTableBySig(tsig){ var ts=document.querySelectorAll("table,[role=table],[role=grid]"); if(!tsig) return ts[0]||null;
+    for(var i=0;i<ts.length;i++){ if(tableSigOf(ts[i])===tsig) return ts[i]; }
+    var want=tsig.split("~")[0]; for(var j=0;j<ts.length;j++){ if(want && tableSigOf(ts[j]).indexOf(want)>=0) return ts[j]; } return null; }
+  function tableScope(tbl){ var p=tbl; for(var i=0;i<7&&p;i++){ if(p.querySelector && (p.querySelector(".ant-pagination")||p.querySelector("[class*=pagination]"))) return p; p=p.parentElement; } return tbl.parentElement||tbl; }
+  function pagDisabled(btn){ if(!btn) return true; if(btn.disabled) return true; var li=btn.closest("li,[class*=pagination-next],[class*=pagination-prev]"); if(li){ if(li.getAttribute("aria-disabled")==="true") return true; if((li.className||"").indexOf("disabled")>=0) return true; } return false; }
+  function pagBtn(tbl, kind){ var scope=tableScope(tbl);
+    var li=scope.querySelector(kind==="next"?".ant-pagination-next":".ant-pagination-prev"); if(li){ return li.querySelector("button")||li; }
+    var glyph = kind==="next" ? ["keyboard_arrow_right","chevron_right","next",">","›"] : ["keyboard_arrow_left","chevron_left","previous","prev","<","‹"];
+    var btns=scope.querySelectorAll("button,[role=button]");
+    for(var i=0;i<btns.length;i++){ var nm=(nameOf(btns[i])||"").toLowerCase(); for(var g=0;g<glyph.length;g++){ if(nm.indexOf(glyph[g])>=0) return btns[i]; } } return null; }
+  function rowInScope(root, atext){ var rows=(root||document).querySelectorAll("tr,[role=row]"); for(var i=0;i<rows.length;i++){ if((rows[i].textContent||"").replace(/\s+/g," ").indexOf(atext)>=0) return rows[i]; } return null; }
+  // rowtext 대상 행이 현재 페이지에 없으면, 그 표를 1페이지부터 넘겨가며 찾는다(데이터 이동/페이지 변화 대응).
+  async function ensureRowVisible(sels){
+    var rt=null; for(var i=0;i<sels.length;i++){ if(sels[i].strategy==="rowtext"){ rt=sels[i]; break; } }
+    if(!rt) return;
+    var rp=rt.value.split("|||"); var atext=rp[0], tsig=rp[2]||"";
+    if(!tsig) return; // 구버전 기록(표 시그니처 없음)은 페이지 탐색 생략
+    var tbl=findTableBySig(tsig); if(!tbl) return;
+    if(rowInScope(tbl, atext)) return; // 이미 현재 페이지에 있음
+    for(var b=0;b<40;b++){ tbl=findTableBySig(tsig)||tbl; var prev=pagBtn(tbl,"prev"); if(pagDisabled(prev)) break; prev.click(); await sleep(400); await waitNetworkIdle(3000); } // 1페이지로
+    for(var f=0;f<80;f++){ tbl=findTableBySig(tsig)||tbl; if(rowInScope(tbl, atext)) return; var next=pagBtn(tbl,"next"); if(pagDisabled(next)) return; next.click(); await sleep(450); await waitNetworkIdle(3000); }
+  }
   function bySel(sel){
     try{
       if(sel.strategy==="testid") return document.querySelector('[data-testid="'+sel.value+'"],[data-test="'+sel.value+'"],[data-cy="'+sel.value+'"]');
@@ -313,9 +341,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         return ms[ridx] || ms[0] || null; }
       if(sel.strategy==="text"){ var els=document.querySelectorAll('a,button,[role=button],summary,label');
         for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
-      if(sel.strategy==="rowtext"){ // "행앵커텍스트|||힌트" → 그 텍스트를 포함하는 행 안에서 타겟을 찾는다
-        var rp=sel.value.split("|||"); var atext=rp[0], hint=rp[1]||"";
-        var rows=document.querySelectorAll('tr, [role=row]');
+      if(sel.strategy==="rowtext"){ // "행앵커|||힌트|||표시그니처" → (그 표 안에서) 앵커 텍스트를 가진 행의 타겟
+        var rp=sel.value.split("|||"); var atext=rp[0], hint=rp[1]||"", tsig=rp[2]||"";
+        var scopeTbl = tsig ? findTableBySig(tsig) : null;
+        var rows=(scopeTbl||document).querySelectorAll('tr, [role=row]');
         for(var k=0;k<rows.length;k++){
           if((rows[k].textContent||"").replace(/\s+/g," ").indexOf(atext)<0) continue;
           if(hint==="radio") return rows[k].querySelector('input[type=radio],input[type=checkbox]') || rows[k];
@@ -460,6 +489,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         report(i, "delegate", JSON.stringify({ name: a.name, step: a.step||{} }));
         return; // 일시정지 — 프론트가 백엔드로 실행 후 이어감
       }
+      // rowtext 대상(표 안 라디오/셀 등)이면 필요 시 그 표의 페이지를 넘겨 대상 행을 찾아둔다.
+      if(a.kind==="click"||a.kind==="input"){ try{ await ensureRowVisible(a.selectors); }catch(e){} }
       // 비활성(disabled) 버튼 클릭은 무효 동작 → 건너뜀. (예: 마지막 페이지에서 '다음'을 더 누른 기록)
       // 짧게 기다려 활성화되는지 확인하고, 그래도 비활성이면 실패가 아니라 스킵으로 처리한다.
       if(a.kind==="click"){
