@@ -179,6 +179,9 @@ impl Store {
             conn.execute("ALTER TABLE ui_flows ADD COLUMN grp TEXT NOT NULL DEFAULT ''", [])
                 .map_err(|e| e.to_string())?;
         }
+        // 정규화(멱등): 명시적 '기본' 그룹을 빈 문자열로 통일 → '기본'과 빈 그룹이 갈라지지 않게.
+        conn.execute("UPDATE ui_flows SET grp='' WHERE grp='기본'", [])
+            .map_err(|e| e.to_string())?;
         // 마이그레이션: RabbitMQ 클러스터 호스트/계정 컬럼 추가.
         for (col, default) in [
             ("mq_hosts", "''"),
@@ -364,6 +367,8 @@ impl Store {
         actions_json: &str,
         updated_at: &str,
     ) -> Result<i64, String> {
+        // '기본'은 빈 그룹의 표시 라벨이므로 저장 시 빈 문자열로 정규화 → 두 그룹으로 갈라지지 않게.
+        let grp = if grp.trim() == "기본" { "" } else { grp.trim() };
         self.conn
             .execute(
                 "INSERT INTO ui_flows (name, site_url, grp, actions_json, updated_at) VALUES (?1,?2,?3,?4,?5)
@@ -436,6 +441,7 @@ impl Store {
 
     /// 그룹명 일괄 변경(해당 사이트에서 old_grp 인 시나리오 전부). 변경된 개수 반환.
     pub fn rename_ui_group(&self, site_url: &str, old_grp: &str, new_grp: &str) -> Result<usize, String> {
+        let new_grp = if new_grp.trim() == "기본" { "" } else { new_grp.trim() };
         self.conn
             .execute(
                 "UPDATE ui_flows SET grp=?1 WHERE site_url=?2 AND grp=?3",
