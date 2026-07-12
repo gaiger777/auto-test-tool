@@ -531,6 +531,8 @@ pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result
     let window = WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
         .title("캡처 세션")
         .initialization_script(&script)
+        // 비영속 세션: 이전 로그인 쿠키를 물고 오지 않게 → 항상 로그아웃 상태(로그인 페이지)에서 기록 시작.
+        .incognito(true)
         .build()
         .map_err(|e| format!("캡처 창 생성 실패: {e}"))?;
     Ok(window)
