@@ -35,9 +35,17 @@ export default function CaptureView() {
   const tree = useColumnWidth('capture.treeW', 280)
   const [posEdits, setPosEdits] = useState<Record<string, string>>({}) // action id → 입력 중인 순번
   const [editIdx, setEditIdx] = useState<number | null>(null) // 편집 중인 프로그램 스텝 인덱스
-  const saveEdit = (a: UiAction) => {
-    setUiActions(list => list.map((x, j) => (j === editIdx ? a : x)))
+  const saveEdit = async (a: UiAction) => {
+    const idx = editIdx
+    if (idx == null) return
+    const next = uiActions.map((x, j) => (j === idx ? a : x))
+    setUiActions(next)
     setEditIdx(null)
+    // 이름 있는 시나리오면 DB에도 바로 반영
+    if (flowName.trim()) {
+      const ok = await persistActions(next)
+      if (ok) setNotice('스텝 수정 저장 · DB 반영됨')
+    }
   }
   const startedAt = useRef(0)
   const envIdRef = useRef<number | null>(null)
@@ -256,6 +264,29 @@ export default function CaptureView() {
       await reloadFlows()
       window.dispatchEvent(new CustomEvent('ui-flows-changed'))
     } catch (e) { setError(String(e)) }
+  }
+
+  // 편집 등 즉시 반영용: 이름 있는(로드/명명된) 시나리오면 DB에 바로 덮어쓴다. 이름 없으면 스킵.
+  const persistActions = async (acts: UiAction[]): Promise<boolean> => {
+    const siteUrl = (url || acts.find(a => a.url)?.url || '').replace(/\/+$/, '')
+    if (!flowName.trim() || !siteUrl) return false
+    const withApi: UiAction[] = acts.map(a => {
+      const linked = corr[a.id]?.length ? corr[a.id] : (a.api || [])
+      return {
+        ...a,
+        api: linked.map(c => ({
+          method: c.method, url: c.url, status: c.status,
+          request_headers: (c as CapturedCall).request_headers ?? {},
+          request_body: (c as CapturedCall).request_body ?? null,
+        })),
+      }
+    })
+    try {
+      await api.saveUiFlow(flowName.trim(), siteUrl, group.trim(), withApi)
+      await reloadFlows()
+      window.dispatchEvent(new CustomEvent('ui-flows-changed'))
+      return true
+    } catch (e) { setError(String(e)); return false }
   }
 
   const resultIcon = (i: number) => {
