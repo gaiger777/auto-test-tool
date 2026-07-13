@@ -418,7 +418,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         for(var j=0;j<els.length;j++){ if(vtext(els[j])===sel.value) return els[j]; } return null; }
       if(sel.strategy==="menu"){ // "아이콘클래스|||텍스트" → 접힘/펼침 무관하게 사이드바 메뉴 매칭
         var mp=sel.value.split("|||"); var icon=mp[0], mtext=mp[1]||"";
-        var items=document.querySelectorAll("[role=menuitem], .ant-menu-item, .ant-menu-submenu-title, li.ant-menu-submenu, li.ant-menu-item");
+        // 클릭 가능한 항목만(서브메뉴는 제목이 토글 타겟). 감싸는 li는 클릭해도 안 펼쳐진다.
+        var items=document.querySelectorAll(".ant-menu-submenu-title, .ant-menu-item, [role=menuitem]");
         if(mtext){ for(var mi=0;mi<items.length;mi++){ var tc=items[mi].querySelector(".ant-menu-title-content"); var t=(tc?tc.textContent:items[mi].textContent||"").replace(/\s+/g," ").trim(); if(t===mtext) return items[mi]; } }
         if(icon){ for(var mj=0;mj<items.length;mj++){ if(items[mj].querySelector && items[mj].querySelector("[class*='"+icon+"']")) return items[mj]; } }
         return null; }
@@ -514,7 +515,12 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       if(__hoverTimer){ pushHover(el); await sleep(60); }
       // ant-pagination: 실제 클릭 타겟은 <li>(내부 button은 tabindex=-1 비활성). 녹화한 '다음'을 기억해둔다.
       var pagLi = el.closest ? el.closest("li.ant-pagination-next, li.ant-pagination-prev, li.ant-pagination-item") : null;
+      var subTitle = el.closest ? el.closest(".ant-menu-submenu-title") : null;
       if(pagLi){ if((""+pagLi.className).indexOf("ant-pagination-next")>=0) window.__lastNextBtn=pagLi; robustClick(pagLi); }
+      else if(subTitle){ // 사이드바 서브메뉴 제목: 이미 펼쳐져 있으면 클릭 시 접히므로 닫혀 있을 때만 클릭.
+        var sm=subTitle.closest(".ant-menu-submenu");
+        if(!sm || (""+sm.className).indexOf("ant-menu-submenu-open")<0) subTitle.click();
+      }
       else {
         // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
         var radio = isRadioLike(el) ? el : (el.querySelector ? el.querySelector('input[type=radio],input[type=checkbox]') : null);
