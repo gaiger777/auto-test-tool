@@ -517,9 +517,15 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       var pagLi = el.closest ? el.closest("li.ant-pagination-next, li.ant-pagination-prev, li.ant-pagination-item") : null;
       var subTitle = el.closest ? el.closest(".ant-menu-submenu-title") : null;
       if(pagLi){ if((""+pagLi.className).indexOf("ant-pagination-next")>=0) window.__lastNextBtn=pagLi; robustClick(pagLi); }
-      else if(subTitle){ // 사이드바 서브메뉴 제목: 이미 펼쳐져 있으면 클릭 시 접히므로 닫혀 있을 때만 클릭.
+      else if(subTitle){ // 사이드바 서브메뉴 제목
         var sm=subTitle.closest(".ant-menu-submenu");
-        if(!sm || (""+sm.className).indexOf("ant-menu-submenu-open")<0) subTitle.click();
+        var menuRoot=subTitle.closest(".ant-menu");
+        var collapsed = menuRoot && (""+menuRoot.className).indexOf("ant-menu-inline-collapsed")>=0;
+        if(collapsed){ // 접힌 사이드바: 호버로 flyout 팝업을 열고 유지(다음 스텝이 팝업 항목을 찾게).
+          pushHover(sm||subTitle); window.__hoverHold=true; await sleep(500);
+        } else if(!sm || (""+sm.className).indexOf("ant-menu-submenu-open")<0){
+          subTitle.click(); // 펼침: 닫혀 있을 때만 클릭(토글로 접히지 않게)
+        }
       }
       else {
         // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
@@ -656,7 +662,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         stepReport(i, "failed", String(e)); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
       }
       // 호버 후속(클릭/입력)이 끝나면 유지 중이던 호버를 해제한다. (다음 호버는 새로 시작)
-      if(a.kind!=="hover") stopHover();
+      // 단, 접힌 사이드바 서브메뉴처럼 '다음 스텝을 위해 팝업을 열어둔' 경우(__hoverHold)는 유지.
+      if(a.kind!=="hover" && !window.__hoverHold) stopHover();
+      window.__hoverHold=false;
       sessionStorage.setItem("__replay_idx", String(i+1));
       await waitNetworkIdle(6000);
       await sleep(300);
