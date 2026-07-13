@@ -8,7 +8,10 @@ export const stepSummary = (a: UiAction): string => {
   const s = a.step || {}
   switch (a.kind) {
     case 'http_call': return `${s.method || 'GET'} ${s.url || ''}${s.expect_status != null ? ' → ' + s.expect_status : ''}`
-    case 'wait_event': return `${s.event_type || ''} (${s.timeout_secs ?? 30}s)`
+    case 'wait_event': {
+      const conds = (s.conditions || []).map(c => `${c.json_path}=${c.equals}`).join(', ')
+      return `${s.event_type || ''} (${s.timeout_secs ?? 30}s)${conds ? ` [${conds}]` : ''}`
+    }
     case 'assert': return `${s.left || ''} ${s.op || 'eq'} ${s.right || ''}`
     case 'sleep': return `${s.seconds ?? 0}초`
     default: return a.selectors[0] ? `${a.selectors[0].strategy}: ${a.selectors[0].value}` : ''
