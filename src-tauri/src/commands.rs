@@ -23,6 +23,8 @@ pub struct AppState {
     /// 화면(채널)별 독립 MQ 세션. 키: "env" | "runner" | "capture".
     /// wait_event 대기 + 프론트 실시간 로그(mq-log)를 채널 단위로 격리한다.
     pub replay_buses: Mutex<HashMap<String, (Arc<EventBus>, CancellationToken)>>,
+    /// 멀티웹뷰 탭 창의 창별 탭 레지스트리. 키: 창 라벨("capture" 등).
+    pub tabs: Mutex<HashMap<String, crate::tabs::TabRegistry>>,
 }
 
 pub struct CaptureHandle {
@@ -360,8 +362,8 @@ pub fn start_capture_session(
             recording: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
     }
-    // 이전 세션이 남긴 창이 있으면 정리 (label 재사용)
-    if let Some(win) = app.get_webview_window("capture") {
+    // 이전 세션이 남긴 창이 있으면 정리 (label 재사용). 멀티웹뷰 Window라 Window로 닫는다.
+    if let Some(win) = app.get_window("capture") {
         let _ = win.close();
     }
 
@@ -383,23 +385,191 @@ pub fn start_capture_session(
         }
     };
 
-    // 사용자가 캡처 창을 직접 닫으면 세션 정리 + 알림 (자기 세션일 때만)
+    // 탭 레지스트리 초기화: 주 사이트 탭(닫기 불가)만 담아 시작.
+    {
+        let mut g = state.tabs.lock().unwrap();
+        g.insert(
+            "capture".into(),
+            crate::tabs::TabRegistry {
+                tabs: vec![crate::tabs::Tab {
+                    label: "capture".into(),
+                    title: "캡처 세션".into(),
+                    closeable: false,
+                }],
+                active: "capture".into(),
+                seq: 0,
+            },
+        );
+    }
+
+    // 창 이벤트: 리사이즈 시 탭바·콘텐츠 재배치, 사용자가 창을 닫으면 세션 정리 + 알림.
     let app_close = app.clone();
     let my_id = token.clone();
+    let win_layout = window.clone();
     window.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
-            let st = app_close.state::<AppState>();
-            let mut guard = st.capture.lock().unwrap();
-            if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
-                if let Some(h) = guard.take() {
-                    h.cancel.cancel();
+        match event {
+            tauri::WindowEvent::Resized(_) => crate::tabs::relayout(&win_layout),
+            tauri::WindowEvent::Destroyed => {
+                let st = app_close.state::<AppState>();
+                st.tabs.lock().unwrap().remove("capture");
+                let mut guard = st.capture.lock().unwrap();
+                if guard.as_ref().map(|h| h.id == my_id).unwrap_or(false) {
+                    if let Some(h) = guard.take() {
+                        h.cancel.cancel();
+                    }
+                    drop(guard);
+                    let _ = app_close.emit("capture-session-ended", ());
                 }
-                drop(guard);
-                let _ = app_close.emit("capture-session-ended", ());
             }
+            _ => {}
         }
     });
     Ok(())
+}
+
+// --- 멀티웹뷰 탭 ---
+
+/// 활성 탭만 보이게: 활성 콘텐츠 웹뷰는 show+focus, 나머지 콘텐츠는 hide, 탭바는 항상 show.
+fn apply_active_tab(app: &AppHandle, state: &AppState, window_label: &str) {
+    let active = state
+        .tabs
+        .lock()
+        .unwrap()
+        .get(window_label)
+        .map(|r| r.active.clone())
+        .unwrap_or_default();
+    if let Some(win) = app.get_window(window_label) {
+        for wv in win.webviews() {
+            if wv.label().ends_with("-tabs") {
+                let _ = wv.show();
+            } else if wv.label() == active {
+                let _ = wv.show();
+                let _ = wv.set_focus();
+            } else {
+                let _ = wv.hide();
+            }
+        }
+    }
+}
+
+/// 탭바 웹뷰로 현재 탭 상태를 브로드캐스트한다.
+fn broadcast_tabs(app: &AppHandle, state: &AppState, window_label: &str) {
+    let st = state
+        .tabs
+        .lock()
+        .unwrap()
+        .get(window_label)
+        .map(|r| r.state(window_label));
+    if let Some(s) = st {
+        let _ = app.emit("capture-tabs", s);
+    }
+}
+
+/// 탭바 웹뷰가 초기 로드 시 현재 탭 상태를 가져간다.
+#[tauri::command]
+pub fn list_tabs(state: State<AppState>, window_label: String) -> crate::tabs::TabsState {
+    state
+        .tabs
+        .lock()
+        .unwrap()
+        .get(&window_label)
+        .map(|r| r.state(&window_label))
+        .unwrap_or(crate::tabs::TabsState {
+            window: window_label,
+            tabs: vec![],
+            active: String::new(),
+        })
+}
+
+/// 새 창(window.open) 대신 같은 창에 콘솔 탭을 추가하고 활성화한다.
+/// 사이트/콘솔 웹뷰(원격 origin)에서 호출된다.
+#[tauri::command]
+pub fn open_tab(
+    app: AppHandle,
+    state: State<AppState>,
+    window_label: String,
+    url: String,
+    title: String,
+) -> Result<(), String> {
+    let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
+    let window = app
+        .get_window(&window_label)
+        .ok_or_else(|| format!("창을 찾을 수 없음: {window_label}"))?;
+    let label = {
+        let mut g = state.tabs.lock().unwrap();
+        let reg = g.entry(window_label.clone()).or_default();
+        reg.seq += 1;
+        format!("{window_label}-tab-{}", reg.seq)
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let phys = window.inner_size().map_err(|e| e.to_string())?;
+    let w = phys.width as f64 / scale;
+    let h = phys.height as f64 / scale;
+    let script = capture_session::open_tab_interceptor(&window_label);
+    window
+        .add_child(
+            tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(parsed))
+                .initialization_script(&script)
+                .incognito(true),
+            tauri::LogicalPosition::new(0.0, crate::tabs::TAB_H),
+            tauri::LogicalSize::new(w, (h - crate::tabs::TAB_H).max(0.0)),
+        )
+        .map_err(|e| format!("콘솔 탭 생성 실패: {e}"))?;
+    {
+        let mut g = state.tabs.lock().unwrap();
+        let reg = g.entry(window_label.clone()).or_default();
+        reg.tabs.push(crate::tabs::Tab {
+            label: label.clone(),
+            title: if title.is_empty() { "콘솔".into() } else { title },
+            closeable: true,
+        });
+        reg.active = label;
+    }
+    apply_active_tab(&app, &state, &window_label);
+    broadcast_tabs(&app, &state, &window_label);
+    Ok(())
+}
+
+/// 탭 전환(탭바 클릭).
+#[tauri::command]
+pub fn activate_tab(app: AppHandle, state: State<AppState>, window_label: String, label: String) {
+    {
+        let mut g = state.tabs.lock().unwrap();
+        if let Some(r) = g.get_mut(&window_label) {
+            r.active = label;
+        }
+    }
+    apply_active_tab(&app, &state, &window_label);
+    broadcast_tabs(&app, &state, &window_label);
+}
+
+/// 탭 닫기(콘솔 탭만 — 주 사이트 탭은 무시).
+#[tauri::command]
+pub fn close_tab(app: AppHandle, state: State<AppState>, window_label: String, label: String) {
+    let closeable = state
+        .tabs
+        .lock()
+        .unwrap()
+        .get(&window_label)
+        .and_then(|r| r.tabs.iter().find(|t| t.label == label).map(|t| t.closeable))
+        .unwrap_or(false);
+    if !closeable {
+        return;
+    }
+    if let Some(wv) = app.get_webview(&label) {
+        let _ = wv.close();
+    }
+    {
+        let mut g = state.tabs.lock().unwrap();
+        if let Some(r) = g.get_mut(&window_label) {
+            r.tabs.retain(|t| t.label != label);
+            if r.active == label {
+                r.active = r.tabs.last().map(|t| t.label.clone()).unwrap_or_default();
+            }
+        }
+    }
+    apply_active_tab(&app, &state, &window_label);
+    broadcast_tabs(&app, &state, &window_label);
 }
 
 /// 캡처 웹뷰의 후킹 스크립트가 IPC로 밀어넣는 캡처를 수집한다.
@@ -873,7 +1043,8 @@ pub fn stop_capture_session(app: AppHandle, state: State<AppState>) -> Result<()
     if let Some(h) = handle {
         h.cancel.cancel();
     }
-    if let Some(window) = app.get_webview_window("capture") {
+    // 멀티웹뷰 Window라 Window로 닫는다(자식 웹뷰들도 함께 정리).
+    if let Some(window) = app.get_window("capture") {
         let _ = window.close();
     }
     let _ = app.emit("capture-session-ended", ());

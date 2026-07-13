@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture-tabbar",
+  "description": "탭 창의 상단 탭바 웹뷰(로컬)가 탭 상태 조회·전환·닫기 명령을 호출",
+  "webviews": ["capture-tabs"],
+  "permissions": ["core:event:default", "allow-list-tabs", "allow-activate-tab", "allow-close-tab"]
+}

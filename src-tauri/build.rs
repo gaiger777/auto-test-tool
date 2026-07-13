@@ -49,6 +49,10 @@ fn main() {
             "clear_ui_runs",
             "rename_ui_flow",
             "rename_ui_group",
+            "list_tabs",
+            "open_tab",
+            "activate_tab",
+            "close_tab",
         ])),
     )
     .expect("failed to run tauri-build");

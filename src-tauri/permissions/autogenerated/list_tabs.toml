@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-tabs"
+description = "Enables the list_tabs command without any pre-configured scope."
+commands.allow = ["list_tabs"]
+
+[[permission]]
+identifier = "deny-list-tabs"
+description = "Denies the list_tabs command without any pre-configured scope."
+commands.deny = ["list_tabs"]

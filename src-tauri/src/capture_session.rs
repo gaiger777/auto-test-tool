@@ -1,4 +1,4 @@
-use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, WebviewUrl};
 
 /// 캡처 웹뷰에 주입할 fetch/XHR 후킹 스크립트를 만든다.
 /// 캡처는 Tauri IPC(`invoke("capture_push", ...)`)로 Rust에 직접 전달한다.
@@ -744,18 +744,89 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     BODY.replace("__TOKEN__", token).replace("__ACTIONS__", actions_json)
 }
 
-/// 대상 URL을 캡처 웹뷰 창("capture")으로 열고 후킹 스크립트를 주입한다.
-pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::WebviewWindow, String> {
+/// 사이트/콘솔 웹뷰가 새 창(window.open·target=_blank)을 열려 하면 별도 OS 창 대신
+/// 같은 창의 '탭'으로 열도록 open_tab 명령으로 우회시키는 주입 스크립트.
+pub fn open_tab_interceptor(window_label: &str) -> String {
+    const TPL: &str = r#####"(function(){
+  function inv(){ return (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke); }
+  function openTab(u, title){
+    try{
+      var abs = new URL(u, location.href).href;
+      var f = inv();
+      if(f){ f("open_tab", { windowLabel: "__WIN__", url: abs, title: (title||"콘솔").slice(0,24) }); return true; }
+    }catch(e){}
+    return false;
+  }
+  var _open = window.open;
+  window.open = function(u, name, features){
+    if(u && openTab(u, name)) return null;
+    return _open ? _open.apply(window, arguments) : null;
+  };
+  // target=_blank 링크 클릭도 탭으로 (WKWebView는 이걸 window.open으로 안 보냄)
+  document.addEventListener("click", function(e){
+    try{
+      var a = e.target && e.target.closest ? e.target.closest('a[target="_blank"], a[target=_blank], a[target=blank]') : null;
+      if(a && a.href){ if(openTab(a.href, (a.textContent||"").trim())){ e.preventDefault(); e.stopPropagation(); } }
+    }catch(err){}
+  }, true);
+})();"#####;
+    TPL.replace("__WIN__", window_label)
+}
+
+/// 탭바 웹뷰에 자기 소속 창 라벨을 알려주는 초기화 스크립트.
+fn tabbar_glue(window_label: &str) -> String {
+    format!("window.__TABWIN__ = {:?};", window_label)
+}
+
+/// 대상 URL을 탭 창("capture")으로 연다. 상단 탭바 웹뷰 + 사이트 콘텐츠 웹뷰("capture")를
+/// 자식으로 얹고, 사이트 스크립트에는 새 창→탭 우회를 덧붙인다. 반환값은 Window(멀티웹뷰).
+pub fn open_capture_window(app: &AppHandle, url: &str, script: String) -> Result<tauri::Window, String> {
+    build_tabbed_window(app, "capture", "캡처 세션", url, script)
+}
+
+/// 탭 창 공통 빌더: window_label 창을 만들고 탭바 + 사이트 콘텐츠 웹뷰를 붙인다.
+pub fn build_tabbed_window(
+    app: &AppHandle,
+    window_label: &str,
+    title: &str,
+    url: &str,
+    site_script: String,
+) -> Result<tauri::Window, String> {
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
-    let window = WebviewWindowBuilder::new(app, "capture", WebviewUrl::External(parsed))
-        .title("캡처 세션")
-        .initialization_script(&script)
-        // 재생 창과 같은 넓이로 열어 사이드바 펼침 상태를 일치시킨다(녹화↔재생 DOM 일관성).
-        .inner_size(1500.0, 950.0)
-        // 비영속 세션: 이전 로그인 쿠키를 물고 오지 않게 → 항상 로그아웃 상태(로그인 페이지)에서 기록 시작.
-        .incognito(true)
+    // 재생 창과 같은 넓이로 열어 사이드바 펼침 상태를 일치시킨다(녹화↔재생 DOM 일관성).
+    let (w, h) = (1500.0_f64, 950.0_f64);
+    let window = tauri::window::WindowBuilder::new(app, window_label)
+        .title(title)
+        .inner_size(w, h)
         .build()
         .map_err(|e| format!("캡처 창 생성 실패: {e}"))?;
+
+    // 상단 탭바(로컬 HTML)
+    window
+        .add_child(
+            tauri::webview::WebviewBuilder::new(
+                format!("{window_label}-tabs"),
+                WebviewUrl::App("tabbar.html".into()),
+            )
+            .initialization_script(tabbar_glue(window_label)),
+            tauri::LogicalPosition::new(0.0, 0.0),
+            tauri::LogicalSize::new(w, crate::tabs::TAB_H),
+        )
+        .map_err(|e| format!("탭바 생성 실패: {e}"))?;
+
+    // 사이트 콘텐츠 웹뷰(라벨 = window_label, 기존 레코더/재생 로직이 이 라벨로 접근)
+    let site_full = format!("{}\n{}", site_script, open_tab_interceptor(window_label));
+    window
+        .add_child(
+            tauri::webview::WebviewBuilder::new(window_label, WebviewUrl::External(parsed))
+                .initialization_script(&site_full)
+                // 비영속 세션: 이전 로그인 쿠키를 물고 오지 않게 → 항상 로그아웃 상태에서 기록 시작.
+                .incognito(true),
+            tauri::LogicalPosition::new(0.0, crate::tabs::TAB_H),
+            tauri::LogicalSize::new(w, h - crate::tabs::TAB_H),
+        )
+        .map_err(|e| format!("사이트 웹뷰 생성 실패: {e}"))?;
+
     Ok(window)
 }
 

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #252526; font-family: -apple-system, sans-serif; }
+  #bar { display: flex; align-items: stretch; height: 40px; gap: 1px; }
+  .tab {
+    display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 0 10px;
+    background: #2d2d2d; color: #ccc; font-size: 12px; cursor: pointer; user-select: none;
+    border-top: 2px solid transparent; white-space: nowrap;
+  }
+  .tab:hover { background: #333; }
+  .tab.active { background: #1e1e1e; color: #fff; border-top-color: #0e639c; }
+  .tab .t { overflow: hidden; text-overflow: ellipsis; }
+  .tab .x {
+    display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+    border-radius: 3px; color: #999; font-size: 13px; line-height: 1;
+  }
+  .tab .x:hover { background: #555; color: #fff; }
+</style>
+</head>
+<body>
+  <div id="bar"></div>
+  <script>
+    const bar = document.getElementById('bar')
+    const WIN = window.__TABWIN__ || 'capture'
+    const inv = () => (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+
+    function render(state) {
+      if (!state || state.window !== WIN) return
+      bar.innerHTML = ''
+      for (const t of state.tabs) {
+        const el = document.createElement('div')
+        el.className = 'tab' + (t.label === state.active ? ' active' : '')
+        el.title = t.title
+        const label = document.createElement('span')
+        label.className = 't'; label.textContent = t.title
+        el.appendChild(label)
+        el.onclick = e => {
+          if (e.target.classList.contains('x')) return
+          const f = inv(); if (f) f('activate_tab', { windowLabel: WIN, label: t.label })
+        }
+        if (t.closeable) {
+          const x = document.createElement('span')
+          x.className = 'x'; x.textContent = '✕'
+          x.onclick = e => { e.stopPropagation(); const f = inv(); if (f) f('close_tab', { windowLabel: WIN, label: t.label }) }
+          el.appendChild(x)
+        }
+        bar.appendChild(el)
+      }
+    }
+
+    function refresh() { const f = inv(); if (f) f('list_tabs', { windowLabel: WIN }).then(render).catch(() => {}) }
+
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      window.__TAURI__.event.listen('capture-tabs', e => render(e.payload))
+    }
+    refresh()
+    // 웹뷰 준비 타이밍 보정: 초기 상태를 몇 번 더 당겨온다.
+    setTimeout(refresh, 150); setTimeout(refresh, 500)
+  </script>
+</body>
+</html>

@@ -11,6 +11,7 @@ pub mod matcher;
 pub mod models;
 pub mod mq;
 pub mod store;
+pub mod tabs;
 pub mod template;
 
 use commands::AppState;
@@ -35,6 +36,7 @@ pub fn run() {
                 capture: Mutex::new(None),
                 replay: Mutex::new(None),
                 replay_buses: Mutex::new(std::collections::HashMap::new()),
+                tabs: Mutex::new(std::collections::HashMap::new()),
             });
             if let Some(main) = app.get_webview_window("main") {
                 // 캡처 창이 깨진 TLS(미신뢰 CA·호스트명 불일치·만료 등) 내부 서버도 로드하도록
@@ -53,7 +55,7 @@ pub fn run() {
                         if let Some(h) = handle {
                             h.cancel.cancel();
                         }
-                        if let Some(w) = app_handle.get_webview_window("capture") {
+                        if let Some(w) = app_handle.get_window("capture") {
                             let _ = w.close();
                         }
                     }
@@ -105,7 +107,11 @@ pub fn run() {
             commands::delete_ui_run,
             commands::clear_ui_runs,
             commands::rename_ui_flow,
-            commands::rename_ui_group
+            commands::rename_ui_group,
+            commands::list_tabs,
+            commands::open_tab,
+            commands::activate_tab,
+            commands::close_tab
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
