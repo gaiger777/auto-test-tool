@@ -1,9 +1,20 @@
 use serde_json::Value;
 use serde_json_path::JsonPath;
 
+/// 사용자가 `$` 없이 `payload.hostname` / `hostname` 처럼 넣어도 되도록 `$.`를 보정한다.
+fn norm_path(p: &str) -> String {
+    let t = p.trim();
+    if t.starts_with('$') {
+        t.to_string()
+    } else {
+        format!("$.{}", t.trim_start_matches('.'))
+    }
+}
+
 /// JSONPath로 값을 찾아 문자열로 돌려준다. 문자열이면 그대로, 아니면 JSON 직렬화.
 pub fn json_path_str(value: &Value, path: &str) -> Result<String, String> {
-    let p = JsonPath::parse(path).map_err(|e| format!("잘못된 JSONPath '{path}': {e}"))?;
+    let np = norm_path(path);
+    let p = JsonPath::parse(&np).map_err(|e| format!("잘못된 JSONPath '{path}': {e}"))?;
     let node = p
         .query(value)
         .exactly_one()
@@ -26,7 +37,7 @@ pub fn compile_conditions(conds: &[(String, String)]) -> Result<Vec<CompiledCond
     conds
         .iter()
         .map(|(p, expected)| {
-            let path = JsonPath::parse(p).map_err(|e| format!("잘못된 JSONPath '{p}': {e}"))?;
+            let path = JsonPath::parse(&norm_path(p)).map_err(|e| format!("잘못된 JSONPath '{p}': {e}"))?;
             Ok(CompiledCondition {
                 path,
                 expected: expected.clone(),
