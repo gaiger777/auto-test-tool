@@ -139,10 +139,10 @@ export default function CaptureView() {
   }
 
   const newScenario = () => {
-    setUiActions([]); setReplayResults({}); setFlowName(''); setLoadedFlowId(null); setNotice('새 시나리오 — 세션을 시작해 기록하거나 스텝을 추가하세요.')
+    setUiActions([]); setReplayResults({}); setFlowName(''); setLoadedFlowId(null); setEditIdx(null); setNotice('새 시나리오 — 세션을 시작해 기록하거나 스텝을 추가하세요.')
   }
   const addStep = (a: UiAction) => { setUiActions(prev => [...prev, a]); setReplayResults({}) }
-  const delUi = (i: number) => { if (!window.confirm('이 동작을 삭제하시겠습니까?')) return; setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}) }
+  const delUi = (i: number) => { if (!window.confirm('이 동작을 삭제하시겠습니까?')) return; setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}); setEditIdx(null) }
   const moveUi = (i: number, d: -1 | 1) => {
     const j = i + d
     if (j < 0 || j >= uiActions.length) return
@@ -225,7 +225,7 @@ export default function CaptureView() {
     setError(''); setNotice('')
     try {
       setUiActions(JSON.parse(f.actions_json) as UiAction[])
-      setFlowName(f.name); setGroup(f.grp || ''); setUrl(f.site_url); setLoadedFlowId(f.id ?? null); setReplayResults({})
+      setFlowName(f.name); setGroup(f.grp || ''); setUrl(f.site_url); setLoadedFlowId(f.id ?? null); setReplayResults({}); setEditIdx(null)
       setNotice(`"${f.name}" 불러옴 — 수정 후 DB 저장하면 덮어씁니다.`)
     } catch (e) { setError(String(e)) }
   }
@@ -323,7 +323,7 @@ export default function CaptureView() {
             <input placeholder="시나리오 이름" value={flowName} onChange={e => setFlowName(e.target.value)} style={{ width: 160 }} />
             <button className="accent" onClick={saveFlow} disabled={uiActions.length === 0}>DB 저장</button>
             <button className="danger" onClick={deleteLoaded} disabled={loadedFlowId == null}>선택 삭제</button>
-            <button className="danger" onClick={() => { if (window.confirm('기록한 UI 동작을 모두 삭제하시겠습니까?')) { setUiActions([]); setReplayResults({}) } }}
+            <button className="danger" onClick={() => { if (window.confirm('기록한 UI 동작을 모두 삭제하시겠습니까?')) { setUiActions([]); setReplayResults({}); setEditIdx(null) } }}
               disabled={uiActions.length === 0 || replaying}>동작 비우기</button>
           </div>
 
