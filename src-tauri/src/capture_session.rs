@@ -517,15 +517,12 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       var pagLi = el.closest ? el.closest("li.ant-pagination-next, li.ant-pagination-prev, li.ant-pagination-item") : null;
       var subTitle = el.closest ? el.closest(".ant-menu-submenu-title") : null;
       if(pagLi){ if((""+pagLi.className).indexOf("ant-pagination-next")>=0) window.__lastNextBtn=pagLi; robustClick(pagLi); }
-      else if(subTitle){ // 사이드바 서브메뉴 제목
+      else if(subTitle){ // 사이드바 서브메뉴 제목: 펼침이면 클릭으로 인라인 확장, 접힘이면 호버로 팝업.
+        // 상태 감지에 의존하지 않고 둘 다 시도 + 다음 스텝까지 호버 유지(하위 메뉴가 인라인/팝업 어디든 보이게).
         var sm=subTitle.closest(".ant-menu-submenu");
-        var menuRoot=subTitle.closest(".ant-menu");
-        var collapsed = menuRoot && (""+menuRoot.className).indexOf("ant-menu-inline-collapsed")>=0;
-        if(collapsed){ // 접힌 사이드바: 호버로 flyout 팝업을 열고 유지(다음 스텝이 팝업 항목을 찾게).
-          pushHover(sm||subTitle); window.__hoverHold=true; await sleep(500);
-        } else if(!sm || (""+sm.className).indexOf("ant-menu-submenu-open")<0){
-          subTitle.click(); // 펼침: 닫혀 있을 때만 클릭(토글로 접히지 않게)
-        }
+        if(!sm || (""+sm.className).indexOf("ant-menu-submenu-open")<0) subTitle.click();
+        pushHover(subTitle); if(sm) pushHover(sm);
+        window.__hoverHold=true; await sleep(600);
       }
       else {
         // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
