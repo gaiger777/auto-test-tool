@@ -13,7 +13,7 @@ import ApiCallsModal, { type CallLike } from '../components/ApiCallsModal'
 import ProgStepAdder from '../components/ProgStepAdder'
 import FlowTree, { groupOf } from '../components/FlowTree'
 import { useColumnWidth } from '../hooks/useColumnWidth'
-import type { Environment, UiAction, UiStepResult, UiFlowRecord } from '../types'
+import { isProgKind, type Environment, type UiAction, type UiStepResult, type UiFlowRecord } from '../types'
 
 export default function CaptureView() {
   const [url, setUrl] = useState('')
@@ -34,6 +34,11 @@ export default function CaptureView() {
   const [modalCalls, setModalCalls] = useState<{ title: string; calls: CallLike[] } | null>(null)
   const tree = useColumnWidth('capture.treeW', 280)
   const [posEdits, setPosEdits] = useState<Record<string, string>>({}) // action id → 입력 중인 순번
+  const [editIdx, setEditIdx] = useState<number | null>(null) // 편집 중인 프로그램 스텝 인덱스
+  const saveEdit = (a: UiAction) => {
+    setUiActions(list => list.map((x, j) => (j === editIdx ? a : x)))
+    setEditIdx(null)
+  }
   const startedAt = useRef(0)
   const envIdRef = useRef<number | null>(null)
   useEffect(() => { envIdRef.current = envId }, [envId])
@@ -349,6 +354,7 @@ export default function CaptureView() {
                       : <span className="dim">0</span>}</td>
                     <td title={replayResults[i]?.detail || ''}>{resultIcon(i)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
+                      {isProgKind(a.kind) && <button onClick={() => setEditIdx(i)} title="스텝 수정">✎</button>}
                       <button onClick={() => moveUi(i, -1)} disabled={i === 0}>↑</button>
                       <button onClick={() => moveUi(i, 1)} disabled={i === uiActions.length - 1}>↓</button>
                       <button className="danger" onClick={() => delUi(i)}>✕</button>
@@ -359,7 +365,9 @@ export default function CaptureView() {
             </tbody>
           </table>
 
-          <ProgStepAdder onAdd={addStep} />
+          {editIdx != null && uiActions[editIdx]
+            ? <ProgStepAdder key={`edit-${editIdx}`} initial={uiActions[editIdx]} onAdd={saveEdit} onCancel={() => setEditIdx(null)} />
+            : <ProgStepAdder onAdd={addStep} />}
         </div>
       </div>
 
