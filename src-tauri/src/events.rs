@@ -19,6 +19,11 @@ impl EventBus {
         self.notify.notify_waiters();
     }
 
+    /// 지금까지 버퍼된 이벤트 사본. 타임아웃 시 "왜 안 맞았나" 진단에 쓴다.
+    pub fn snapshot(&self) -> Vec<Value> {
+        self.buffer.lock().unwrap().clone()
+    }
+
     /// pred에 맞는 이벤트를 버퍼(과거) + 실시간(미래)에서 찾는다. timeout 초과 시 Err.
     ///
     /// 시맨틱: "과거"는 이 wait_for 호출 시점이 아니라 **버스 생성(실행 시작) 시점**부터다.

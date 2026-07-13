@@ -639,14 +639,55 @@ pub async fn run_wait_event(
         .collect();
     let compiled = crate::matcher::compile_conditions(&conds)?;
     let et = event_type.clone();
-    let event = bus
+    match bus
         .wait_for(
             move |e| crate::matcher::matches(e, &et, &compiled),
             std::time::Duration::from_secs(timeout_secs),
         )
-        .await?;
-    let s = event.to_string();
-    Ok(if s.len() > 2000 { s[..2000].to_string() } else { s })
+        .await
+    {
+        Ok(event) => {
+            let s = event.to_string();
+            Ok(if s.len() > 2000 { s[..2000].to_string() } else { s })
+        }
+        // 타임아웃: event_type 자체가 안 온 건지, 왔는데 조건이 어긋난 건지 구분해 알려준다.
+        Err(_) => Err(wait_timeout_diag(&bus, &event_type, &conds, timeout_secs)),
+    }
+}
+
+/// wait_event 타임아웃 원인 진단 메시지. event_type이 도착한 이벤트가 있으면
+/// 그 최신 이벤트 기준으로 조건별 기대값 vs 실제값을 비교해 보여준다.
+fn wait_timeout_diag(
+    bus: &crate::events::EventBus,
+    event_type: &str,
+    conds: &[(String, String)],
+    timeout_secs: u64,
+) -> String {
+    let events = bus.snapshot();
+    let typed: Vec<&serde_json::Value> = events
+        .iter()
+        .filter(|e| e.get("event_type").and_then(|v| v.as_str()) == Some(event_type))
+        .collect();
+    if typed.is_empty() {
+        return format!("타임아웃({timeout_secs}s): '{event_type}' 이벤트가 도착하지 않았습니다");
+    }
+    if conds.is_empty() {
+        return format!("타임아웃({timeout_secs}s): '{event_type}' {}건 도착 (조건 없음)", typed.len());
+    }
+    let last = typed.last().unwrap();
+    let diags: Vec<String> = conds
+        .iter()
+        .map(|(p, expected)| match crate::matcher::json_path_str(last, p) {
+            Ok(actual) if &actual == expected => format!("{p}: 일치"),
+            Ok(actual) => format!("{p}: 기대='{expected}' ≠ 실제='{actual}'"),
+            Err(_) => format!("{p}: 경로 없음(기대='{expected}')"),
+        })
+        .collect();
+    format!(
+        "타임아웃({timeout_secs}s): '{event_type}' {}건 도착했으나 조건 불일치 — {}",
+        typed.len(),
+        diags.join(", ")
+    )
 }
 
 // --- UI 실행 히스토리 ---
