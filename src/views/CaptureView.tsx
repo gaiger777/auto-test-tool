@@ -340,7 +340,10 @@ export default function CaptureView() {
                       title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n') || stepSummary(a)}>
                       {stepSummary(a)}
                     </td>
-                    <td>{a.value ?? ''}</td>
+                    <td><input value={a.value ?? ''} disabled={replaying}
+                      onChange={e => setUiActions(list => list.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                      placeholder={a.kind === 'input' ? '값' : ''}
+                      style={{ width: 120, fontSize: 12, padding: '2px 4px' }} title="값 수정" /></td>
                     <td>{linked.length > 0
                       ? <button onClick={() => setModalCalls({ title: a.name || `동작 ${i + 1}`, calls: linked as CallLike[] })} title="유발된 네트워크 호출 보기">▸ {linked.length}</button>
                       : <span className="dim">0</span>}</td>
