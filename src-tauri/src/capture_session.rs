@@ -525,9 +525,12 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         window.__hoverHold=true; await sleep(600);
       }
       else {
-        // 라디오/체크박스는 대상 자신이거나 셀/라벨 안의 input을 직접 클릭(숨겨진 input도 토글됨).
+        // 메뉴 항목(특히 hover 팝업 안)은 단순 .click()이 라우팅을 안 트리거할 수 있어 전체 이벤트로 클릭.
+        var menuItem = el.closest ? el.closest(".ant-menu-item, [role=menuitem]") : null;
         var radio = isRadioLike(el) ? el : (el.querySelector ? el.querySelector('input[type=radio],input[type=checkbox]') : null);
-        if(radio){ radio.click(); } else { el.click(); }
+        if(radio){ radio.click(); }
+        else if(menuItem){ robustClick(menuItem); }
+        else { el.click(); }
       }
     }
   }
