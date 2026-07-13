@@ -202,7 +202,7 @@ pub fn recorder_script(token: &str) -> String {
     out.push({{ strategy: "css", value: cssPath(el) }});
     return out;
   }}
-  function hrefOf(el) {{ try {{ var a = el.closest ? el.closest("a[href]") : null; return (a && a.href) ? a.href : null; }} catch (e) {{ return null; }} }}
+  function hrefOf(el) {{ try {{ var a = el.closest ? el.closest("a[href]") : null; if (!a && el.querySelector) a = el.querySelector("a[href]"); return (a && a.href) ? a.href : null; }} catch (e) {{ return null; }} }}
   // 페이지네이션(다음/이전/페이지번호) 조작은 기록하지 않는다 — 재생 시 플레이어가 대상 행을
   // 이름으로 찾으며 필요한 만큼 페이지를 자동으로 넘긴다.
   function isPagination(el) {{ try {{
@@ -653,6 +653,23 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
           }
         }
         stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")+(window.__rowDiag?(" ["+window.__rowDiag+"]"):"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
+      }
+      // 사이드바 '리프' 메뉴 항목은 클릭 대신 URL로 직접 이동(접힌 사이드바 hover 팝업/호버
+      // 타이밍으로 클릭이 라우팅을 못 트리거하는 문제 회피). 서브메뉴 제목(href 없음)은 제외.
+      if(a.kind==="click" && el.closest){
+        var mi = el.closest(".ant-menu-item, [role=menuitem]");
+        if(mi){
+          var lnk = mi.querySelector ? mi.querySelector("a[href]") : null;
+          if(!lnk && mi.closest) lnk = mi.closest("a[href]");
+          var href = (lnk && lnk.href) ? lnk.href : (a.href||"");
+          if(href){
+            stepReport(i, "passed", "메뉴 이동: "+href);
+            sessionStorage.setItem("__replay_idx", String(i+1));
+            stopHover();
+            location.href = href;
+            return;
+          }
+        }
       }
       // API 검증 기준 시각: 실제 동작 직전(대기 중 배경 폴링 호출은 제외).
       var netStart=Date.now();
