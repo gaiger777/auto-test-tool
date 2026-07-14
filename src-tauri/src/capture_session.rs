@@ -388,7 +388,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     var rt=null; for(var i=0;i<sels.length;i++){ if(sels[i].strategy==="rowtext"){ rt=sels[i]; break; } }
     if(!rt) return;
     var rp=rt.value.split("|||"); var atext=rp[0], tsig=rp[2]||"", tidx=(rp[3]!=null?parseInt(rp[3],10):-1);
-    var tbl=findTable(tsig, tidx); if(!tbl){ window.__rowDiag="표못찾음:"+tsig.slice(0,20)+"/idx"+tidx; return; }
+    // 표가 아직 렌더 전(페이지 전환 직후 blank/로딩)일 수 있으니 나타날 때까지 잠시 재시도한다.
+    var tbl=findTable(tsig, tidx);
+    for(var w=0; !tbl && w<12; w++){ await sleep(400); await waitNetworkIdle(2000); tbl=findTable(tsig, tidx); }
+    if(!tbl){ window.__rowDiag="표못찾음(대기후):"+tsig.slice(0,20)+"/idx"+tidx; return; }
     if(rowInScope(tbl, atext)){ window.__rowDiag="현재페이지에있음"; return; }
     var pages=0;
     // 1페이지로 되감기
