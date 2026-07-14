@@ -830,6 +830,8 @@ pub fn build_tabbed_window(
         )
         .map_err(|e| format!("사이트 웹뷰 생성 실패: {e}"))?;
 
+    // 실제 창 크기에 맞춰 탭바(전폭)·사이트를 재배치(생성 시 하드코딩 크기 보정).
+    crate::tabs::relayout(&window);
     Ok(window)
 }
 

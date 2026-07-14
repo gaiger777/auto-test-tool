@@ -525,6 +525,7 @@ pub fn open_tab(
         });
         reg.active = label;
     }
+    crate::tabs::relayout(&window);
     apply_active_tab(&app, &state, &window_label);
     broadcast_tabs(&app, &state, &window_label);
     Ok(())

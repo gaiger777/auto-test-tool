@@ -57,8 +57,8 @@
       window.__TAURI__.event.listen('capture-tabs', e => render(e.payload))
     }
     refresh()
-    // 웹뷰 준비 타이밍 보정: 초기 상태를 몇 번 더 당겨온다.
-    setTimeout(refresh, 150); setTimeout(refresh, 500)
+    // 이벤트를 놓쳐도 항상 최신 탭 목록이 보이도록 주기적으로 당겨온다(견고성).
+    setInterval(refresh, 1000)
   </script>
 </body>
 </html>
