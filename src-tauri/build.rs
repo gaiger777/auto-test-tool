@@ -53,6 +53,7 @@ fn main() {
             "open_tab",
             "activate_tab",
             "close_tab",
+            "switch_replay_tab",
         ])),
     )
     .expect("failed to run tauri-build");

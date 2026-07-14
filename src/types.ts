@@ -65,7 +65,7 @@ export interface UiCall {
 }
 
 // UI 동작 종류: 웹뷰에서 재생하는 UI 스텝 + 흐름에 끼워넣는 프로그램 스텝.
-export type UiKind = 'click' | 'input' | 'hover' | 'http_call' | 'wait_event' | 'assert' | 'sleep'
+export type UiKind = 'click' | 'input' | 'hover' | 'http_call' | 'wait_event' | 'assert' | 'sleep' | 'tab_switch'
 export const UI_STEP_KINDS: UiKind[] = ['click', 'input', 'hover']
 export const PROG_STEP_KINDS: UiKind[] = ['http_call', 'wait_event', 'assert', 'sleep']
 export const isProgKind = (k: UiKind) => PROG_STEP_KINDS.includes(k)
@@ -102,6 +102,8 @@ export interface UiAction {
   timestamp: number
   // 프로그램 스텝(http_call/wait_event/assert/sleep)일 때의 설정
   step?: UiProgStep | null
+  // 이 동작이 일어난 탭 인덱스(0=사이트, 1+=콘솔). tab_switch면 value에 대상 인덱스.
+  tab?: number
 }
 
 // UI 재생 스텝 결과 (index = -1 은 재생 종료 신호, status 'delegate' 는 백엔드 위임 요청)

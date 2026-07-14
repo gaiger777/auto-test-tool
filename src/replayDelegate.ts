@@ -7,11 +7,20 @@ import type { UiProgStep } from './types'
 export async function runDelegatedStep(index: number, detailJson: string, envId: number | null, channel: string) {
   let name = ''
   let step: UiProgStep = {}
+  let tabSwitch: number | null = null
   try {
     const p = JSON.parse(detailJson)
     name = p.name || ''
     step = p.step || {}
+    tabSwitch = (p.tabSwitch != null) ? Number(p.tabSwitch) : null
   } catch { /* detail 파싱 실패 시 빈 스텝 */ }
+
+  // tab_switch 위임: 대상 탭을 활성화하고 그 탭 플레이어를 다음 스텝부터 재개(여기서 resume하지 않음).
+  if (tabSwitch != null) {
+    try { await api.switchReplayTab(tabSwitch, index + 1) }
+    catch { /* 창이 닫혔으면 무시 */ }
+    return
+  }
 
   let status = 'passed'
   let detail = ''

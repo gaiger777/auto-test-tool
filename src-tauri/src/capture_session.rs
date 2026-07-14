@@ -221,7 +221,7 @@ pub fn recorder_script(token: &str) -> String {
         && el.querySelectorAll("input,button,[role=radio],[role=checkbox],[role=button],a,select,textarea").length > 3) return;
     send({{ id: "u" + (++uiseq), kind: kind, selectors: ladder(el), name: nameOf(el),
             value: (value != null ? String(value) : null), href: (kind === "click" ? hrefOf(el) : null),
-            url: location.href, timestamp: Date.now() }});
+            url: location.href, timestamp: Date.now(), tab: (window.__TABIDX__||0) }});
   }}
   // 클릭 캡처: click 이벤트가 정상이면 그걸 쓰고, hover 메뉴처럼 mousedown에서 이동/닫힘이
   // 일어나 click이 안 뜨는 경우를 위해 pointerdown 폴백(뒤이어 click이 오면 취소)을 둔다.
@@ -267,7 +267,7 @@ pub fn recorder_script(token: &str) -> String {
     if (__lastHover && __lastHover.el === el && Date.now() - __lastHover.t < 1500) return;
     __lastHover = {{ el: el, t: Date.now() }};
     send({{ id: "u" + (++uiseq), kind: "hover", selectors: ladder(el), name: nameOf(el),
-            value: null, url: location.href, timestamp: Date.now() }});
+            value: null, url: location.href, timestamp: Date.now(), tab: (window.__TABIDX__||0) }});
   }}
   try {{
     var __mo = new MutationObserver(function(muts) {{
@@ -514,17 +514,7 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(a.kind==="hover"){
       pushHover(el);      // 타이머는 여기서 멈추지 않는다 → 다음 스텝(클릭)까지 유지
       await sleep(450);
-    } else if(a.kind==="input"){ setNativeValue(el, a.value!=null?a.value:"");
-      // 검색/필터 텍스트 입력은 Enter로 적용되는 경우가 많다 → 텍스트류에만 Enter를 쏜다.
-      // 라디오/체크박스/숫자(spinbutton)는 폼 제출·단계전환 등 부작용이 있어 제외.
-      var tg=(el.tagName||"").toLowerCase(), tp=(el.type||"").toLowerCase(), rl=el.getAttribute&&el.getAttribute("role");
-      var isText = tg==="textarea"
-        || (tg==="input" && (tp===""||tp==="text"||tp==="search"||tp==="email"||tp==="url"||tp==="tel"))
-        || rl==="textbox" || rl==="searchbox";
-      if(isText){ try{ var ek={key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true};
-        el.dispatchEvent(new KeyboardEvent("keydown",ek));
-        el.dispatchEvent(new KeyboardEvent("keyup",ek)); }catch(e){} }
-    }
+    } else if(a.kind==="input"){ setNativeValue(el, a.value!=null?a.value:""); }
     else {
       // 호버가 유지 중이면 클릭 대상 자신에도 hover를 얹어(중첩 메뉴 대응) 클릭한다.
       if(__hoverTimer){ pushHover(el); await sleep(60); }
@@ -580,6 +570,7 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   }
   // wait_event 위임 후 프론트가 결과와 함께 호출 → 같은 페이지에서 다음 스텝부터 재개.
   window.__replayResume = function(nextIdx, prevStatus, prevDetail){
+    sessionStorage.setItem("__replay_started","1"); // 콘솔 탭도 이제부터는 재개(부트)해도 됨
     if(prevStatus){ stepReport(nextIdx-1, prevStatus, prevDetail||"");
       if(prevStatus==="failed") sessionStorage.setItem("__replay_fail","1"); }
     sessionStorage.setItem("__replay_idx", String(nextIdx));
@@ -628,6 +619,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         sessionStorage.setItem("__replay_idx", String(i)); // 위임 실행 후 __replayResume(i+1)로 재개
         report(i, "delegate", JSON.stringify({ name: a.name, step: a.step||{} }));
         return; // 일시정지 — 프론트가 백엔드로 실행 후 이어감
+      }
+      if(a.kind==="tab_switch"){
+        stopHover();
+        sessionStorage.setItem("__replay_idx", String(i)); // 대상 탭에서 __replayResume(i+1)로 재개
+        // 프론트가 대상 탭을 활성화하고 그 탭의 플레이어를 재개한다. 현재 탭 플레이어는 여기서 멈춘다.
+        report(i, "delegate", JSON.stringify({ name: a.name, tabSwitch: (a.value!=null?parseInt(a.value,10):0) }));
+        return;
       }
       // rowtext 대상(표 안 라디오/셀 등)이면 필요 시 그 표의 페이지를 넘겨 대상 행을 찾아둔다.
       if(a.kind==="click"||a.kind==="input"){ try{ await ensureRowVisible(a.selectors); }catch(e){} }
@@ -700,6 +698,26 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       sessionStorage.setItem("__replay_idx", String(i+1));
       await waitNetworkIdle(6000);
       await sleep(300);
+      // 검색/필터 텍스트 입력의 Enter 적용: 레코더가 타이핑 중간값을 여러 input으로 기록하므로,
+      // 같은 필드로 이어지는 중간 입력엔 Enter를 생략하고 '그 필드의 마지막 입력'에서만 Enter를 쏜다
+      // (중간값이 각각 태그로 쌓이는 문제 방지). 라디오/체크박스/숫자에는 Enter를 쏘지 않는다.
+      if(a.kind==="input"){
+        var tg=(el.tagName||"").toLowerCase(), tp=(el.type||"").toLowerCase(), rl=el.getAttribute&&el.getAttribute("role");
+        var isText = tg==="textarea"
+          || (tg==="input" && (tp===""||tp==="text"||tp==="search"||tp==="email"||tp==="url"||tp==="tel"))
+          || rl==="textbox" || rl==="searchbox";
+        var nx=ACTIONS[i+1];
+        var same = nx && nx.kind==="input" && nx.selectors && a.selectors && nx.selectors[0] && a.selectors[0] && nx.selectors[0].value===a.selectors[0].value;
+        if(isText && !same){ try{ var ek={key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true};
+          el.dispatchEvent(new KeyboardEvent("keydown",ek));
+          el.dispatchEvent(new KeyboardEvent("keyup",ek)); }catch(e){} }
+      }
+      // 로그인 등 제출 버튼이 간혹 안 먹는 경우: 클릭했는데 로그인 API도 안 나갔고 여전히 로그인
+      // 페이지면 한 번 더 클릭한다. (성공했으면 API가 나갔거나 페이지가 바뀌므로 재클릭하지 않음)
+      if(a.kind==="click" && /로그인|login|sign\s*in/i.test(a.name||"") && onLoginPage()){
+        var c0=(window.__net||[]).filter(function(c){ return c.ts>=netStart; });
+        if(c0.length===0){ var lb=resolve(a.selectors); if(lb && !lb.disabled){ lb.click(); await waitNetworkIdle(6000); await sleep(400); } }
+      }
       // API 검증: 이 동작 이후 발생한 호출 중 4xx/5xx가 있으면 스텝 실패 표시(재생은 계속).
       var base=(a.kind==="input"?"입력: ":a.kind==="hover"?"호버: ":"클릭: ")+(a.name||"");
       var calls=(window.__net||[]).filter(function(c){ return c.ts>=netStart; });
@@ -727,6 +745,8 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     runFrom(0);
   };
   function boot(){
+    // 콘솔 탭(__AUTORUN__=false)은 스위치되기 전(아직 재개 안 됨)엔 자동 실행하지 않고 대기한다.
+    if(window.__AUTORUN__===false && sessionStorage.getItem("__replay_started")!=="1") return;
     var fresh = sessionStorage.getItem("__replay_runid") !== TOKEN;
     if(fresh){ sessionStorage.setItem("__replay_runid", TOKEN); sessionStorage.setItem("__replay_idx", "0");
       sessionStorage.setItem("__replay_actions", JSON.stringify(ACTIONS)); // 초기 시나리오 시드
@@ -827,7 +847,9 @@ pub fn build_tabbed_window(
                 format!("{window_label}-tabs"),
                 WebviewUrl::App("tabbar.html".into()),
             )
-            .initialization_script(tabbar_glue(window_label)),
+            .initialization_script(tabbar_glue(window_label))
+            // 다른 웹뷰가 포커스여도 탭바 첫 클릭이 바로 먹게(두 번 클릭 방지).
+            .accept_first_mouse(true),
             tauri::LogicalPosition::new(0.0, 0.0),
             tauri::LogicalSize::new(w, crate::tabs::TAB_H),
         )
@@ -842,7 +864,8 @@ pub fn build_tabbed_window(
             tauri::webview::WebviewBuilder::new(&site_label, WebviewUrl::External(parsed))
                 .initialization_script(&site_full)
                 // 비영속 세션: 이전 로그인 쿠키를 물고 오지 않게 → 항상 로그아웃 상태에서 기록 시작.
-                .incognito(true),
+                .incognito(true)
+                .accept_first_mouse(true),
             tauri::LogicalPosition::new(0.0, crate::tabs::TAB_H),
             tauri::LogicalSize::new(w, h - crate::tabs::TAB_H),
         )

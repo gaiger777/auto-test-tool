@@ -58,6 +58,9 @@ pub struct UiAction {
     /// 프로그램 스텝(http_call/wait_event/assert/sleep)의 설정. UI 스텝이면 없음.
     #[serde(default)]
     pub step: Option<serde_json::Value>,
+    /// 이 동작이 일어난 탭 인덱스(0=주 사이트, 1+=열린 순서의 콘솔 탭). tab_switch 동작은 value에 대상 인덱스.
+    #[serde(default)]
+    pub tab: i64,
 }
 
 /// UI 재생 중 한 스텝의 결과. 플레이어 스크립트가 `ui_replay_step` 커맨드로 보고한다.

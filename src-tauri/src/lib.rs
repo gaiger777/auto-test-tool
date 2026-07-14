@@ -37,6 +37,7 @@ pub fn run() {
                 replay: Mutex::new(None),
                 replay_buses: Mutex::new(std::collections::HashMap::new()),
                 tabs: Mutex::new(std::collections::HashMap::new()),
+                replay_actions: Mutex::new(String::new()),
             });
             if let Some(main) = app.get_webview_window("main") {
                 // 캡처 창이 깨진 TLS(미신뢰 CA·호스트명 불일치·만료 등) 내부 서버도 로드하도록
@@ -111,7 +112,8 @@ pub fn run() {
             commands::list_tabs,
             commands::open_tab,
             commands::activate_tab,
-            commands::close_tab
+            commands::close_tab,
+            commands::switch_replay_tab
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -53,6 +53,10 @@ export const continueUiReplay = (actions: UiAction[]) => invoke<void>('continue_
 export const runWaitEvent = (eventType: string, conditions: Condition[], timeoutSecs: number, channel: string) =>
   invoke<string>('run_wait_event', { eventType, conditions, timeoutSecs, channel })
 
+// 재생 중 tab_switch: 대상 탭 활성화 + 그 탭 플레이어를 nextIdx부터 재개
+export const switchReplayTab = (targetIdx: number, nextIdx: number) =>
+  invoke<void>('switch_replay_tab', { targetIdx, nextIdx })
+
 // UI 실행 히스토리
 export const createUiRun = (flowId: number | null, flowName: string, siteUrl: string) =>
   invoke<number>('create_ui_run', { flowId, flowName, siteUrl })

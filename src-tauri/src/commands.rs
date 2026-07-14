@@ -25,6 +25,8 @@ pub struct AppState {
     pub replay_buses: Mutex<HashMap<String, (Arc<EventBus>, CancellationToken)>>,
     /// 멀티웹뷰 탭 창의 창별 탭 레지스트리. 키: 창 라벨("capture" 등).
     pub tabs: Mutex<HashMap<String, crate::tabs::TabRegistry>>,
+    /// 현재 재생 액션 JSON — 재생 중 새 콘솔 탭에 플레이어를 주입할 때 사용.
+    pub replay_actions: Mutex<String>,
 }
 
 pub struct CaptureHandle {
@@ -500,57 +502,173 @@ pub fn open_tab(
     let window = app
         .get_window(&window_label)
         .ok_or_else(|| format!("창을 찾을 수 없음: {window_label}"))?;
-    let label = {
+    // 새 탭의 라벨과 탭 인덱스(0=사이트, 1+=콘솔 순서)를 정한다.
+    let (label, tab_idx) = {
         let mut g = state.tabs.lock().unwrap();
         let reg = g.entry(window_label.clone()).or_default();
         reg.seq += 1;
-        format!("{window_label}-tab-{}", reg.seq)
+        let idx = reg.tabs.len() as i64; // 사이트가 [0]에 있으므로 첫 콘솔=1
+        (format!("{window_label}-tab-{}", reg.seq), idx)
     };
     let scale = window.scale_factor().unwrap_or(1.0);
     let phys = window.inner_size().map_err(|e| e.to_string())?;
     let w = phys.width as f64 / scale;
     let h = phys.height as f64 / scale;
-    let script = capture_session::open_tab_interceptor(&window_label);
+    // 콘솔 웹뷰에도 기록/재생 스크립트를 주입한다(멀티탭 기록·재생).
+    let interceptor = capture_session::open_tab_interceptor(&window_label);
+    let idx_js = format!("window.__TABIDX__ = {tab_idx};\n");
+    let is_replay = window_label.starts_with("replay-");
+    let full_script = if is_replay {
+        // 재생: 콘솔 플레이어는 tab_switch로 활성화될 때까지 대기(__AUTORUN__=false).
+        let token = state.replay.lock().unwrap().clone().unwrap_or_default();
+        let actions = state.replay_actions.lock().unwrap().clone();
+        let player = capture_session::player_script(&token, &actions);
+        format!("{idx_js}window.__AUTORUN__=false;\n{player}\n{interceptor}")
+    } else {
+        // 캡처: 콘솔 동작·네트워크를 기록(사이트와 동일 훅+레코더).
+        let token = state
+            .capture
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|h| h.id.clone())
+            .unwrap_or_default();
+        format!(
+            "{idx_js}{}\n{}\n{interceptor}",
+            capture_session::hook_script(&token),
+            capture_session::recorder_script(&token)
+        )
+    };
     window
         .add_child(
             tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(parsed))
-                .initialization_script(&script)
-                .incognito(true),
+                .initialization_script(&full_script)
+                .incognito(true)
+                .accept_first_mouse(true),
             tauri::LogicalPosition::new(0.0, crate::tabs::TAB_H),
             tauri::LogicalSize::new(w, (h - crate::tabs::TAB_H).max(0.0)),
         )
         .map_err(|e| format!("콘솔 탭 생성 실패: {e}"))?;
+    let tab_title = if title.is_empty() { "콘솔".to_string() } else { title };
     {
         let mut g = state.tabs.lock().unwrap();
         let reg = g.entry(window_label.clone()).or_default();
         reg.tabs.push(crate::tabs::Tab {
             label: label.clone(),
-            title: if title.is_empty() { "콘솔".into() } else { title },
+            title: tab_title.clone(),
             closeable: true,
         });
         // 캡처(수동): 새 콘솔 탭으로 전환해 사용자가 바로 조작. 재생: 플레이어가 사이트에서
         // 계속 돌아야 하므로 콘솔은 배경 탭으로만 추가(사이트 활성 유지).
-        if !window_label.starts_with("replay-") {
+        if !is_replay {
             reg.active = label;
         }
     }
     crate::tabs::relayout(&window);
     apply_active_tab(&app, &state, &window_label);
     broadcast_tabs(&app, &state, &window_label);
+    // 캡처 중이면 '탭 전환(콘솔로)'을 동작으로 기록한다 → 재생 시 이 탭으로 전환.
+    record_tab_switch(&app, &state, &window_label, tab_idx, &tab_title);
     Ok(())
+}
+
+/// 캡처 세션이 레코딩 중이면 tab_switch 동작을 기록한다(대상 탭 인덱스 = target_idx).
+fn record_tab_switch(app: &AppHandle, state: &AppState, window_label: &str, target_idx: i64, title: &str) {
+    if window_label != "capture" {
+        return;
+    }
+    let seq = {
+        let g = state.capture.lock().unwrap();
+        match g.as_ref() {
+            Some(h) if h.recording.load(std::sync::atomic::Ordering::Relaxed) => h.seq.clone(),
+            _ => return,
+        }
+    };
+    let n = seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let action = capture_server::UiAction {
+        id: format!("u{n}"),
+        kind: "tab_switch".into(),
+        selectors: vec![],
+        name: format!("탭 전환: {title}"),
+        value: Some(target_idx.to_string()),
+        href: None,
+        api: vec![],
+        url: String::new(),
+        timestamp: 0,
+        step: None,
+        tab: 0,
+    };
+    let _ = app.emit("ui-recorded", action);
 }
 
 /// 탭 전환(탭바 클릭).
 #[tauri::command]
 pub fn activate_tab(app: AppHandle, state: State<AppState>, window_label: String, label: String) {
-    {
+    let (idx, title) = {
         let mut g = state.tabs.lock().unwrap();
-        if let Some(r) = g.get_mut(&window_label) {
-            r.active = label;
+        match g.get_mut(&window_label) {
+            Some(r) => {
+                r.active = label.clone();
+                let i = r.tabs.iter().position(|t| t.label == label).map(|p| p as i64);
+                let t = r.tabs.iter().find(|t| t.label == label).map(|t| t.title.clone());
+                (i, t.unwrap_or_default())
+            }
+            None => (None, String::new()),
         }
-    }
+    };
     apply_active_tab(&app, &state, &window_label);
     broadcast_tabs(&app, &state, &window_label);
+    // 캡처 중 사용자가 탭을 클릭해 전환한 것도 동작으로 기록.
+    if let Some(i) = idx {
+        record_tab_switch(&app, &state, &window_label, i, &title);
+    }
+}
+
+/// 재생 중 tab_switch 위임 처리: 대상 탭을 활성화하고 그 탭 플레이어를 next_idx부터 재개한다.
+#[tauri::command]
+pub fn switch_replay_tab(
+    app: AppHandle,
+    state: State<AppState>,
+    target_idx: i64,
+    next_idx: i64,
+) -> Result<(), String> {
+    let win_label = app
+        .windows()
+        .into_iter()
+        .map(|(l, _)| l)
+        .find(|l| l.starts_with("replay-"))
+        .ok_or("재생 창이 없습니다")?;
+    let target_label = {
+        let g = state.tabs.lock().unwrap();
+        let reg = g.get(&win_label).ok_or("탭 레지스트리 없음")?;
+        reg.tabs
+            .get(target_idx as usize)
+            .map(|t| t.label.clone())
+            .ok_or_else(|| format!("탭 인덱스 {target_idx} 없음"))?
+    };
+    if let Some(r) = state.tabs.lock().unwrap().get_mut(&win_label) {
+        r.active = target_label.clone();
+    }
+    apply_active_tab(&app, &state, &win_label);
+    broadcast_tabs(&app, &state, &win_label);
+    // 대상 탭 웹뷰의 플레이어를 next_idx부터 재개. 콘솔 페이지 로드가 늦을 수 있어 준비될 때까지 폴링.
+    if let Some(wv) = app.get_webview(&target_label) {
+        let _ = wv.eval(&format!(
+            "(function r(n){{ if(window.__replayResume){{ window.__replayResume({next_idx}, \"passed\", \"탭 전환\"); return; }} if(n>0) setTimeout(function(){{ r(n-1); }}, 300); }})(30);"
+        ));
+    }
+    Ok(())
+}
+
+/// 재생 창의 현재 활성 탭 웹뷰(eval 대상). tab_switch 이후 wait_event 재개 등에 사용.
+fn active_replay_webview(app: &AppHandle, state: &AppState) -> Option<tauri::Webview> {
+    let win_label = app
+        .windows()
+        .into_iter()
+        .map(|(l, _)| l)
+        .find(|l| l.starts_with("replay-"))?;
+    let active = state.tabs.lock().unwrap().get(&win_label).map(|r| r.active.clone())?;
+    app.get_webview(&active)
 }
 
 /// 탭 닫기(콘솔 탭만 — 주 사이트 탭은 무시).
@@ -669,6 +787,7 @@ pub fn start_ui_replay(
         }
     }
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
+    *state.replay_actions.lock().unwrap() = json.clone(); // 새 콘솔 탭 플레이어 주입용
     let script = capture_session::player_script(&token, &json);
     let label = format!("replay-{token}");
     // 캡처 창과 같은 탭(멀티웹뷰) 구조 — 콘솔 등 새 창을 같은 창의 탭으로 연다.
@@ -770,11 +889,15 @@ pub fn stop_ui_replay(app: AppHandle, state: State<AppState>) -> Result<(), Stri
 #[tauri::command]
 pub fn resume_ui_replay(
     app: AppHandle,
+    state: State<AppState>,
     next_idx: i64,
     prev_status: String,
     prev_detail: String,
 ) -> Result<(), String> {
-    let win = replay_site_webview(&app).ok_or("재생 창이 없습니다")?;
+    // tab_switch 이후엔 활성 탭(콘솔일 수 있음)에서 재개해야 하므로 활성 탭 웹뷰를 쓴다.
+    let win = active_replay_webview(&app, &state)
+        .or_else(|| replay_site_webview(&app))
+        .ok_or("재생 창이 없습니다")?;
     let js = format!(
         "window.__replayResume && window.__replayResume({}, {}, {})",
         next_idx,

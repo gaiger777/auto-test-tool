@@ -4,7 +4,14 @@
   "description": "캡처/재생 창(외부 원격 페이지)이 IPC로 데이터를 밀어넣도록 허용",
   "windows": ["capture", "replay-*"],
   "remote": {
-    "urls": ["https://*.okestro.cloud", "https://*.okestro-k8s.com"]
+    "urls": [
+      "https://*.okestro.cloud",
+      "https://*.okestro-k8s.com",
+      "https://*",
+      "http://*",
+      "https://*:*",
+      "http://*:*"
+    ]
   },
   "permissions": ["allow-capture-push", "allow-ui-record", "allow-ui-replay-step", "allow-open-tab"]
 }

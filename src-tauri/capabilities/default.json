@@ -46,6 +46,7 @@
     "allow-delete-ui-run",
     "allow-clear-ui-runs",
     "allow-rename-ui-flow",
-    "allow-rename-ui-group"
+    "allow-rename-ui-group",
+    "allow-switch-replay-tab"
   ]
 }
