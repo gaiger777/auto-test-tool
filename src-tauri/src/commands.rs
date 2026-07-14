@@ -865,8 +865,44 @@ pub fn continue_ui_replay(
     if state.replay.lock().unwrap().is_none() {
         return Err("활성 재생 세션이 없습니다".into());
     }
-    let win = replay_site_webview(&app).ok_or("재생 창이 없습니다")?;
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
+    // 새 항목의 콘솔 탭 플레이어가 '이 항목' 액션을 받도록 갱신(안 하면 이전 항목 액션이 주입됨).
+    *state.replay_actions.lock().unwrap() = json.clone();
+    // 이전 항목이 연 콘솔 탭을 닫고 탭 레지스트리를 사이트 탭만으로 리셋(탭 인덱스 일관성).
+    if let Some(win_label) = app
+        .windows()
+        .into_iter()
+        .map(|(l, _)| l)
+        .find(|l| l.starts_with("replay-"))
+    {
+        let console_labels: Vec<String> = state
+            .tabs
+            .lock()
+            .unwrap()
+            .get(&win_label)
+            .map(|r| {
+                r.tabs
+                    .iter()
+                    .filter(|t| t.label.contains("-tab-"))
+                    .map(|t| t.label.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for lbl in console_labels {
+            if let Some(wv) = app.get_webview(&lbl) {
+                let _ = wv.close();
+            }
+        }
+        let site = format!("{win_label}-site");
+        if let Some(r) = state.tabs.lock().unwrap().get_mut(&win_label) {
+            r.tabs.retain(|t| t.label == site);
+            r.active = site.clone();
+            r.seq = 0;
+        }
+        apply_active_tab(&app, &state, &win_label);
+        broadcast_tabs(&app, &state, &win_label);
+    }
+    let win = replay_site_webview(&app).ok_or("재생 창이 없습니다")?;
     // __replayLoad 에 액션 JSON을 문자열 인자로 전달(이중 인코딩 → JS 문자열 리터럴).
     let arg = serde_json::to_string(&json).map_err(|e| e.to_string())?;
     win.eval(&format!("window.__replayLoad && window.__replayLoad({arg})"))
