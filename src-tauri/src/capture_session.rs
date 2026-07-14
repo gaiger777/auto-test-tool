@@ -341,8 +341,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   // 헤더 시그니처로 못 찾으면 위치 인덱스(tidx)로 폴백.
   function findTable(tsig, tidx){ var t = tsig ? findTableBySig(tsig) : null; if(t) return t;
     var gs=allGrids(); if(tidx!=null && tidx>=0 && gs[tidx]) return gs[tidx]; return gs[0]||null; }
-  var PAG_NEXT=["keyboard_arrow_right","chevron_right","navigate_next","arrow_forward_ios","다음","next"];
-  var PAG_PREV=["keyboard_arrow_left","chevron_left","navigate_before","arrow_back_ios","이전","previous","prev"];
+  // 표 페이지네이션은 아이콘 글리프만으로 식별한다. "다음"/"이전"/"next"/"prev" 텍스트는
+  // 위저드 단계이동 버튼(이전/다음)과 겹쳐, 표 되감기가 부모 위저드를 뒤로 보내는 버그를 유발하므로 제외.
+  var PAG_NEXT=["keyboard_arrow_right","chevron_right","navigate_next","arrow_forward_ios"];
+  var PAG_PREV=["keyboard_arrow_left","chevron_left","navigate_before","arrow_back_ios"];
   function findPagBtnIn(scope, glyph){ if(!scope||!scope.querySelectorAll) return null;
     var bs=scope.querySelectorAll("button,[role=button],a,li,span,i"); for(var i=0;i<bs.length;i++){ var nm=(nameOf(bs[i])||"").toLowerCase().trim();
       for(var g=0;g<glyph.length;g++){ if(nm===glyph[g] || nm.indexOf(glyph[g])>=0){ return bs[i].closest("button,[role=button],a,li")||bs[i]; } } } return null; }
@@ -513,11 +515,15 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       pushHover(el);      // 타이머는 여기서 멈추지 않는다 → 다음 스텝(클릭)까지 유지
       await sleep(450);
     } else if(a.kind==="input"){ setNativeValue(el, a.value!=null?a.value:"");
-      // 검색/필터 입력은 Enter로 적용되는 경우가 많다. 합성 keydown은 신뢰 이벤트가 아니라
-      // 네이티브 폼 제출을 유발하지 않으므로, onPressEnter류 핸들러만 안전하게 트리거한다.
-      try{ var ek={key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true};
+      // 검색/필터 텍스트 입력은 Enter로 적용되는 경우가 많다 → 텍스트류에만 Enter를 쏜다.
+      // 라디오/체크박스/숫자(spinbutton)는 폼 제출·단계전환 등 부작용이 있어 제외.
+      var tg=(el.tagName||"").toLowerCase(), tp=(el.type||"").toLowerCase(), rl=el.getAttribute&&el.getAttribute("role");
+      var isText = tg==="textarea"
+        || (tg==="input" && (tp===""||tp==="text"||tp==="search"||tp==="email"||tp==="url"||tp==="tel"))
+        || rl==="textbox" || rl==="searchbox";
+      if(isText){ try{ var ek={key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true};
         el.dispatchEvent(new KeyboardEvent("keydown",ek));
-        el.dispatchEvent(new KeyboardEvent("keyup",ek)); }catch(e){}
+        el.dispatchEvent(new KeyboardEvent("keyup",ek)); }catch(e){} }
     }
     else {
       // 호버가 유지 중이면 클릭 대상 자신에도 hover를 얹어(중첩 메뉴 대응) 클릭한다.
@@ -804,9 +810,13 @@ pub fn build_tabbed_window(
     let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
     // 재생 창과 같은 넓이로 열어 사이드바 펼침 상태를 일치시킨다(녹화↔재생 DOM 일관성).
     let (w, h) = (1500.0_f64, 950.0_f64);
+    // Overlay 제목표시줄: 콘텐츠가 최상단부터 차고 신호등만 오버레이 → 크롬처럼 탭바를 맨 위에.
+    // hidden_title: 제목 텍스트 숨김(탭만 보이게).
     let window = tauri::window::WindowBuilder::new(app, window_label)
         .title(title)
         .inner_size(w, h)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
         .build()
         .map_err(|e| format!("캡처 창 생성 실패: {e}"))?;
 
@@ -823,11 +833,13 @@ pub fn build_tabbed_window(
         )
         .map_err(|e| format!("탭바 생성 실패: {e}"))?;
 
-    // 사이트 콘텐츠 웹뷰(라벨 = window_label, 기존 레코더/재생 로직이 이 라벨로 접근)
+    // 사이트 콘텐츠 웹뷰. 라벨을 창 라벨과 다르게("-site") 줘야 Tauri가 이걸 창의 '주 웹뷰'로
+    // 오인해 창 전체로 자동 확장(탭바를 덮음)하는 것을 막는다.
+    let site_label = format!("{window_label}-site");
     let site_full = format!("{}\n{}", site_script, open_tab_interceptor(window_label));
     window
         .add_child(
-            tauri::webview::WebviewBuilder::new(window_label, WebviewUrl::External(parsed))
+            tauri::webview::WebviewBuilder::new(&site_label, WebviewUrl::External(parsed))
                 .initialization_script(&site_full)
                 // 비영속 세션: 이전 로그인 쿠키를 물고 오지 않게 → 항상 로그아웃 상태에서 기록 시작.
                 .incognito(true),

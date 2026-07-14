@@ -391,12 +391,13 @@ pub fn start_capture_session(
         g.insert(
             "capture".into(),
             crate::tabs::TabRegistry {
+                // 메인 탭 라벨은 실제 사이트 웹뷰 라벨("capture-site")과 일치해야 activate 시 표시된다.
                 tabs: vec![crate::tabs::Tab {
-                    label: "capture".into(),
+                    label: "capture-site".into(),
                     title: "캡처 세션".into(),
-                    closeable: false,
+                    closeable: true,
                 }],
-                active: "capture".into(),
+                active: "capture-site".into(),
                 seq: 0,
             },
         );
@@ -440,12 +441,16 @@ fn apply_active_tab(app: &AppHandle, state: &AppState, window_label: &str) {
         .unwrap_or_default();
     if let Some(win) = app.get_window(window_label) {
         for wv in win.webviews() {
-            if wv.label().ends_with("-tabs") {
+            let lbl = wv.label().to_string();
+            if lbl.ends_with("-tabs") {
+                // 탭바는 항상 표시.
                 let _ = wv.show();
-            } else if wv.label() == active {
+            } else if lbl == active {
+                // 활성 콘텐츠(사이트 또는 콘솔)만 표시 + 포커스 → 그 웹뷰가 클릭을 받는다.
                 let _ = wv.show();
                 let _ = wv.set_focus();
             } else {
+                // 비활성 콘텐츠(사이트 포함)는 숨긴다 → 겹침으로 인한 클릭 가로채기 방지.
                 let _ = wv.hide();
             }
         }
@@ -523,8 +528,8 @@ pub fn open_tab(
             title: if title.is_empty() { "콘솔".into() } else { title },
             closeable: true,
         });
-        // 재생 중엔 플레이어가 조작하는 site 탭을 계속 활성 유지(콘솔은 배경 탭으로만 추가).
-        // 탭 전환은 사용자가 시나리오 동작으로 넣는다. 캡처(수동)에선 새 콘솔을 바로 보여준다.
+        // 캡처(수동): 새 콘솔 탭으로 전환해 사용자가 바로 조작. 재생: 플레이어가 사이트에서
+        // 계속 돌아야 하므로 콘솔은 배경 탭으로만 추가(사이트 활성 유지).
         if !window_label.starts_with("replay-") {
             reg.active = label;
         }
@@ -551,27 +556,28 @@ pub fn activate_tab(app: AppHandle, state: State<AppState>, window_label: String
 /// 탭 닫기(콘솔 탭만 — 주 사이트 탭은 무시).
 #[tauri::command]
 pub fn close_tab(app: AppHandle, state: State<AppState>, window_label: String, label: String) {
-    let closeable = state
-        .tabs
-        .lock()
-        .unwrap()
-        .get(&window_label)
-        .and_then(|r| r.tabs.iter().find(|t| t.label == label).map(|t| t.closeable))
-        .unwrap_or(false);
-    if !closeable {
-        return;
-    }
     if let Some(wv) = app.get_webview(&label) {
         let _ = wv.close();
     }
-    {
+    let empty = {
         let mut g = state.tabs.lock().unwrap();
-        if let Some(r) = g.get_mut(&window_label) {
-            r.tabs.retain(|t| t.label != label);
-            if r.active == label {
-                r.active = r.tabs.last().map(|t| t.label.clone()).unwrap_or_default();
+        match g.get_mut(&window_label) {
+            Some(r) => {
+                r.tabs.retain(|t| t.label != label);
+                if r.active == label {
+                    r.active = r.tabs.last().map(|t| t.label.clone()).unwrap_or_default();
+                }
+                r.tabs.is_empty()
             }
+            None => false,
         }
+    };
+    // 마지막 탭까지 닫으면 창을 닫는다(크롬처럼).
+    if empty {
+        if let Some(win) = app.get_window(&window_label) {
+            let _ = win.close();
+        }
+        return;
     }
     apply_active_tab(&app, &state, &window_label);
     broadcast_tabs(&app, &state, &window_label);
@@ -677,12 +683,13 @@ pub fn start_ui_replay(
         g.insert(
             label.clone(),
             crate::tabs::TabRegistry {
+                // 메인 탭 라벨은 실제 사이트 웹뷰 라벨("{label}-site")과 일치해야 activate 시 표시된다.
                 tabs: vec![crate::tabs::Tab {
-                    label: label.clone(),
+                    label: format!("{label}-site"),
                     title: "UI 재생".into(),
-                    closeable: false,
+                    closeable: true,
                 }],
-                active: label.clone(),
+                active: format!("{label}-site"),
                 seq: 0,
             },
         );
@@ -708,9 +715,10 @@ fn replay_site_webview(app: &AppHandle) -> Option<tauri::Webview> {
         .into_iter()
         .find(|(l, _)| l.starts_with("replay-"))
         .map(|(_, w)| w)?;
+    // 콘솔 탭("-tab-N")·탭바("-tabs")가 아니라 사이트 콘텐츠 웹뷰("-site")를 정확히 고른다.
     win.webviews()
         .into_iter()
-        .find(|wv| !wv.label().ends_with("-tabs"))
+        .find(|wv| wv.label().ends_with("-site"))
 }
 
 /// 재생 웹뷰의 플레이어가 IPC로 보고하는 스텝 결과를 수집한다.

@@ -3,27 +3,43 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #252526; font-family: -apple-system, sans-serif; }
-  #bar { display: flex; align-items: stretch; height: 40px; gap: 1px; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1a1a; font-family: -apple-system, sans-serif; }
+  /* 왼쪽 여백: macOS 신호등(닫기/최소화/최대화)이 탭바 위에 오버레이되므로 그 자리를 비운다. */
+  #bar { display: flex; align-items: stretch; height: 40px; padding: 5px 0 0 86px; box-sizing: border-box; }
+  #tabs { display: flex; align-items: stretch; gap: 2px; }
+  /* 남는 공간은 창 이동용 드래그 영역 */
+  #drag { flex: 1; height: 100%; -webkit-app-region: drag; }
+  /* 크롬형 탭: 비활성은 투명, 활성은 둥근 상단으로 채워져 아래(콘텐츠)까지 넓게 선택 표시 */
   .tab {
-    display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 0 10px;
-    background: #2d2d2d; color: #ccc; font-size: 12px; cursor: pointer; user-select: none;
-    border-top: 2px solid transparent; white-space: nowrap;
+    position: relative;
+    display: flex; align-items: center; gap: 8px; min-width: 110px; max-width: 240px;
+    padding: 0 8px 0 14px; box-sizing: border-box;
+    background: transparent; color: #9d9d9d; font-size: 13px; cursor: pointer; user-select: none;
+    border-radius: 12px 12px 0 0; white-space: nowrap;
   }
-  .tab:hover { background: #333; }
-  .tab.active { background: #1e1e1e; color: #fff; border-top-color: #0e639c; }
-  .tab .t { overflow: hidden; text-overflow: ellipsis; }
+  .tab:hover { background: #2f2f2f; color: #ddd; }
+  .tab.active { background: #3c3c3c; color: #fff; }
+  /* 비활성 탭 사이 얇은 세로 구분선(크롬처럼). 활성/호버 탭에는 표시 안 함. */
+  .tab::after {
+    content: ''; position: absolute; right: -2px; top: 22%; height: 56%; width: 1px; background: #4a4a4a;
+  }
+  .tab.active::after, .tab:hover::after, .tab.active + .tab::after, .tab:hover + .tab::after { background: transparent; }
+  .tab:last-child::after { background: transparent; }
+  .tab .t { overflow: hidden; text-overflow: ellipsis; flex: 1; }
   .tab .x {
-    display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
-    border-radius: 3px; color: #999; font-size: 13px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+    border-radius: 4px; color: #bbb; font-size: 15px; line-height: 1; flex: 0 0 auto;
   }
-  .tab .x:hover { background: #555; color: #fff; }
+  .tab .x:hover { background: #c0392b; color: #fff; }
 </style>
 </head>
 <body>
-  <div id="bar"></div>
+  <div id="bar">
+    <div id="tabs"></div>
+    <div id="drag" data-tauri-drag-region></div>
+  </div>
   <script>
-    const bar = document.getElementById('bar')
+    const tabsEl = document.getElementById('tabs')
     const WIN = window.__TABWIN__ || 'capture'
     // add_child 웹뷰엔 withGlobalTauri 전역(__TAURI__)이 없을 수 있어 항상 존재하는 저수준 브리지를 우선 사용.
     const inv = () => (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke)
@@ -31,7 +47,7 @@
 
     function render(state) {
       if (!state || state.window !== WIN) return
-      bar.innerHTML = ''
+      tabsEl.innerHTML = ''
       for (const t of state.tabs) {
         const el = document.createElement('div')
         el.className = 'tab' + (t.label === state.active ? ' active' : '')
@@ -45,11 +61,11 @@
         }
         if (t.closeable) {
           const x = document.createElement('span')
-          x.className = 'x'; x.textContent = '✕'
+          x.className = 'x'; x.textContent = '✕'; x.title = '탭 닫기'
           x.onclick = e => { e.stopPropagation(); const f = inv(); if (f) f('close_tab', { windowLabel: WIN, label: t.label }) }
           el.appendChild(x)
         }
-        bar.appendChild(el)
+        tabsEl.appendChild(el)
       }
     }
 
