@@ -523,7 +523,11 @@ pub fn open_tab(
             title: if title.is_empty() { "콘솔".into() } else { title },
             closeable: true,
         });
-        reg.active = label;
+        // 재생 중엔 플레이어가 조작하는 site 탭을 계속 활성 유지(콘솔은 배경 탭으로만 추가).
+        // 탭 전환은 사용자가 시나리오 동작으로 넣는다. 캡처(수동)에선 새 콘솔을 바로 보여준다.
+        if !window_label.starts_with("replay-") {
+            reg.active = label;
+        }
     }
     crate::tabs::relayout(&window);
     apply_active_tab(&app, &state, &window_label);

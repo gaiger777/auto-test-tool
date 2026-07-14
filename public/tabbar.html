@@ -25,7 +25,9 @@
   <script>
     const bar = document.getElementById('bar')
     const WIN = window.__TABWIN__ || 'capture'
-    const inv = () => (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
+    // add_child 웹뷰엔 withGlobalTauri 전역(__TAURI__)이 없을 수 있어 항상 존재하는 저수준 브리지를 우선 사용.
+    const inv = () => (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke)
+      || (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)
 
     function render(state) {
       if (!state || state.window !== WIN) return

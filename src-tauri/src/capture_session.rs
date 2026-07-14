@@ -512,7 +512,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(a.kind==="hover"){
       pushHover(el);      // 타이머는 여기서 멈추지 않는다 → 다음 스텝(클릭)까지 유지
       await sleep(450);
-    } else if(a.kind==="input"){ setNativeValue(el, a.value!=null?a.value:""); }
+    } else if(a.kind==="input"){ setNativeValue(el, a.value!=null?a.value:"");
+      // 검색/필터 입력은 Enter로 적용되는 경우가 많다. 합성 keydown은 신뢰 이벤트가 아니라
+      // 네이티브 폼 제출을 유발하지 않으므로, onPressEnter류 핸들러만 안전하게 트리거한다.
+      try{ var ek={key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true};
+        el.dispatchEvent(new KeyboardEvent("keydown",ek));
+        el.dispatchEvent(new KeyboardEvent("keyup",ek)); }catch(e){}
+    }
     else {
       // 호버가 유지 중이면 클릭 대상 자신에도 hover를 얹어(중첩 메뉴 대응) 클릭한다.
       if(__hoverTimer){ pushHover(el); await sleep(60); }
