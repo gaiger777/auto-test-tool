@@ -652,29 +652,60 @@ pub fn start_ui_replay(
     *state.replay.lock().unwrap() = Some(token.clone());
     // 이전 재생 창을 닫는다. 새 창은 고유 라벨을 쓰므로 닫힘이 비동기여도 라벨 충돌이 없다
     // (예전엔 "replay" 고정 라벨을 닫고 즉시 재생성해 연속 실행 시 창 생성이 실패했다).
-    for (label, win) in app.webview_windows() {
+    for (label, win) in app.windows() {
         if label.starts_with("replay-") {
             let _ = win.close();
         }
     }
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
     let script = capture_session::player_script(&token, &json);
-    let parsed: tauri::Url = url.parse().map_err(|_| format!("잘못된 URL: {url}"))?;
     let label = format!("replay-{token}");
-    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed))
-        .title("UI 재생")
-        .initialization_script(&script)
-        // 넓게 열어 좌측 사이드바가 '펼쳐진' 상태로 유지되게 한다(좁으면 접혀서 DOM이 달라져 요소를 못 찾음).
-        .inner_size(1500.0, 950.0)
-        // 비영속 세션: 이전 실행의 로그인 쿠키를 물고 와 자동 로그인되는 것을 막는다
-        // (로그인 시나리오가 항상 로그아웃 상태에서 시작). 연속 실행은 같은 창을 재사용해 로그인 유지.
-        .incognito(true)
-        .build()
-        .map_err(|e| {
+    // 캡처 창과 같은 탭(멀티웹뷰) 구조 — 콘솔 등 새 창을 같은 창의 탭으로 연다.
+    let window =
+        capture_session::build_tabbed_window(&app, &label, "UI 재생", &url, script).map_err(|e| {
             *state.replay.lock().unwrap() = None;
-            format!("재생 창 생성 실패: {e}")
+            e
         })?;
+    // 탭 레지스트리: 주 사이트(재생) 탭만 담아 시작(닫기 불가).
+    {
+        let mut g = state.tabs.lock().unwrap();
+        g.insert(
+            label.clone(),
+            crate::tabs::TabRegistry {
+                tabs: vec![crate::tabs::Tab {
+                    label: label.clone(),
+                    title: "UI 재생".into(),
+                    closeable: false,
+                }],
+                active: label.clone(),
+                seq: 0,
+            },
+        );
+    }
+    // 리사이즈 시 탭바/콘텐츠 재배치, 창 닫히면 탭 레지스트리 정리.
+    let app_ev = app.clone();
+    let reg_key = label.clone();
+    let win_layout = window.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::Resized(_) => crate::tabs::relayout(&win_layout),
+        tauri::WindowEvent::Destroyed => {
+            app_ev.state::<AppState>().tabs.lock().unwrap().remove(&reg_key);
+        }
+        _ => {}
+    });
     Ok(())
+}
+
+/// 현재 재생 창의 사이트 콘텐츠 웹뷰(탭바 제외)를 찾는다. eval 대상.
+fn replay_site_webview(app: &AppHandle) -> Option<tauri::Webview> {
+    let win = app
+        .windows()
+        .into_iter()
+        .find(|(l, _)| l.starts_with("replay-"))
+        .map(|(_, w)| w)?;
+    win.webviews()
+        .into_iter()
+        .find(|wv| !wv.label().ends_with("-tabs"))
 }
 
 /// 재생 웹뷰의 플레이어가 IPC로 보고하는 스텝 결과를 수집한다.
@@ -702,12 +733,7 @@ pub fn continue_ui_replay(
     if state.replay.lock().unwrap().is_none() {
         return Err("활성 재생 세션이 없습니다".into());
     }
-    let win = app
-        .webview_windows()
-        .into_iter()
-        .find(|(l, _)| l.starts_with("replay-"))
-        .map(|(_, w)| w)
-        .ok_or("재생 창이 없습니다")?;
+    let win = replay_site_webview(&app).ok_or("재생 창이 없습니다")?;
     let json = serde_json::to_string(&actions).map_err(|e| e.to_string())?;
     // __replayLoad 에 액션 JSON을 문자열 인자로 전달(이중 인코딩 → JS 문자열 리터럴).
     let arg = serde_json::to_string(&json).map_err(|e| e.to_string())?;
@@ -719,7 +745,7 @@ pub fn continue_ui_replay(
 #[tauri::command]
 pub fn stop_ui_replay(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     *state.replay.lock().unwrap() = None;
-    for (label, win) in app.webview_windows() {
+    for (label, win) in app.windows() {
         if label.starts_with("replay-") {
             let _ = win.close();
         }
@@ -735,12 +761,7 @@ pub fn resume_ui_replay(
     prev_status: String,
     prev_detail: String,
 ) -> Result<(), String> {
-    let win = app
-        .webview_windows()
-        .into_iter()
-        .find(|(l, _)| l.starts_with("replay-"))
-        .map(|(_, w)| w)
-        .ok_or("재생 창이 없습니다")?;
+    let win = replay_site_webview(&app).ok_or("재생 창이 없습니다")?;
     let js = format!(
         "window.__replayResume && window.__replayResume({}, {}, {})",
         next_idx,
