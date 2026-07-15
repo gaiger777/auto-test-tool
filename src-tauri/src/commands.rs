@@ -558,11 +558,9 @@ pub fn open_tab(
             title: tab_title.clone(),
             closeable: true,
         });
-        // 캡처(수동): 새 콘솔 탭으로 전환해 사용자가 바로 조작. 재생: 플레이어가 사이트에서
-        // 계속 돌아야 하므로 콘솔은 배경 탭으로만 추가(사이트 활성 유지).
-        if !is_replay {
-            reg.active = label;
-        }
+        // 새 콘솔 탭이 열리면 항상 그 탭으로 전환한다(캡처·재생·수동 동일). 재생 중에도 콘솔 open
+        // 다음 액션은 tab_switch(위임)라 사이트가 잠시 숨겨져도 플레이어가 깨지지 않는다.
+        reg.active = label;
     }
     crate::tabs::relayout(&window);
     apply_active_tab(&app, &state, &window_label);
