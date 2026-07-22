@@ -99,7 +99,8 @@ pub fn recorder_script(token: &str) -> String {
     }} catch (e) {{}}
   }}
   function esc(s) {{ return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&"); }}
-  function stableId(id) {{ return id && !/^[0-9]/.test(id) && !/[0-9a-f]{{6,}}/i.test(id) && id.length < 40; }}
+  // rc-util 자동 id(rc_select_N, rc-tabs-… 등)는 페이지 로드마다 번호가 바뀌어 불안정 → 제외.
+  function stableId(id) {{ return id && !/^[0-9]/.test(id) && !/[0-9a-f]{{6,}}/i.test(id) && !/^rc[-_]/.test(id) && id.length < 40; }}
   function stableClass(c) {{ return c && !/^(css-|sc-|jss|makeStyles|_)/.test(c) && !/[0-9a-f]{{5,}}/i.test(c) && !/\d{{3,}}/.test(c); }}
   function nameOf(el) {{
     var a = (el.getAttribute("aria-label") || "").trim(); if (a) return a;
@@ -141,6 +142,14 @@ pub fn recorder_script(token: &str) -> String {
     var out = [];
     var tid = el.getAttribute("data-testid") || el.getAttribute("data-test") || el.getAttribute("data-cy");
     if (tid) out.push({{ strategy: "testid", value: tid }});
+    // ant-select: 내부 id(rc_select_N)가 불안정 → 감싼 폼 항목의 라벨 텍스트로 안정 앵커(최우선).
+    var antWrap = el.closest ? el.closest(".ant-select") : null;
+    if (antWrap) {{
+      var fi = antWrap.closest(".ant-form-item");
+      var lbl = fi ? fi.querySelector("label") : null;
+      var lt = lbl ? (lbl.textContent || "").replace(/\s+/g, " ").trim().replace(/[\s*:]+$/, "") : "";
+      if (lt) out.push({{ strategy: "antsel", value: lt }});
+    }}
     if (el.id && stableId(el.id)) out.push({{ strategy: "id", value: el.id }});
     var role = roleOf(el), nm = nameOf(el);
     var isRadio = el.tagName === "INPUT" && (el.type === "radio" || el.type === "checkbox");
@@ -252,15 +261,29 @@ pub fn recorder_script(token: &str) -> String {
     clearTimeout(__timers.get(el));
     __timers.set(el, setTimeout(function() {{ recInput(el); }}, 600));
   }}, true);
+  // 파일 업로드: <input type=file>는 값(경로)이 브라우저 보안상 가려져(fakepath) 재생 불가.
+  // 대신 'file_upload' 스텝으로 기록하고, 실제 올릴 파일은 시나리오에서 사용자가 지정한다(value=경로).
+  // 파일 선택창이 '열리기만' 해도(취소해도) 기록되도록 file input의 click을 잡는다(드롭존이
+  // 프로그램적으로 input.click() 하는 것도 잡힘). change(실제 선택)와 중복 기록은 시간창으로 방지.
+  var __lastFileUp = new WeakMap();
+  function recordFileUpload(inp, fn) {{
+    if (!inp) return;
+    var now = Date.now();
+    if (__lastFileUp.get(inp) && now - __lastFileUp.get(inp) < 2000) return;
+    __lastFileUp.set(inp, now);
+    send({{ id: "u" + (++uiseq), kind: "file_upload", selectors: ladder(inp),
+            name: "파일 업로드" + (fn ? ": " + fn : ""), value: null,
+            url: location.href, timestamp: now, tab: (window.__TABIDX__||0) }});
+  }}
+  document.addEventListener("click", function(e) {{
+    var el = e.target;
+    if (el && el.tagName === "INPUT" && (el.getAttribute("type") || "").toLowerCase() === "file") recordFileUpload(el, "");
+  }}, true);
   document.addEventListener("change", function(e) {{
     var el = e.target;
-    // 파일 업로드: <input type=file>는 값(경로)이 브라우저 보안상 가려져(fakepath) 재생 불가.
-    // 대신 'file_upload' 스텝으로 기록하고, 실제 올릴 파일은 시나리오에서 사용자가 지정한다(value=경로).
     if (el && el.tagName === "INPUT" && (el.getAttribute("type") || "").toLowerCase() === "file") {{
       var fn = (el.files && el.files[0]) ? el.files[0].name : "";
-      send({{ id: "u" + (++uiseq), kind: "file_upload", selectors: ladder(el),
-              name: "파일 업로드" + (fn ? ": " + fn : ""), value: null,
-              url: location.href, timestamp: Date.now(), tab: (window.__TABIDX__||0) }});
+      recordFileUpload(el, fn);
       return;
     }}
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT")) return;
@@ -424,6 +447,12 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     try{
       if(sel.strategy==="testid") return document.querySelector('[data-testid="'+sel.value+'"],[data-test="'+sel.value+'"],[data-cy="'+sel.value+'"]');
       if(sel.strategy==="id") return document.getElementById(sel.value);
+      if(sel.strategy==="antsel"){ // 폼 라벨 텍스트로 ant-select를 찾아 클릭 가능한 selector 박스를 돌려준다.
+        var fis=document.querySelectorAll(".ant-form-item");
+        for(var ai=0;ai<fis.length;ai++){ var l=fis[ai].querySelector("label");
+          var t=l?(l.textContent||"").replace(/\s+/g," ").trim().replace(/[\s*:]+$/,""):"";
+          if(t===sel.value){ var box=fis[ai].querySelector(".ant-select-selector"); if(box) return box; return fis[ai].querySelector(".ant-select")||null; } }
+        return null; }
       if(sel.strategy==="name"||sel.strategy==="css") return document.querySelector(sel.value);
       if(sel.strategy==="role"){ var p=sel.value.split("|"); var role=p[0], nm=(p.slice(1).join("|"));
         var all=document.querySelectorAll('a,button,input,select,textarea,[role]');
@@ -474,12 +503,23 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     return st.visibility!=="hidden" && parseFloat(st.opacity||"1")>0.01; }
   // 셀렉터 목록에서 '액션 가능한(보이고 enabled)' 첫 요소를 찾는다.
   // 앞 셀렉터가 숨겨진 요소(예: role:tooltip)를 가리켜도 멈추지 않고 다음 셀렉터(css 등)로 폴백한다.
+  // ant-select의 실제 타겟은 숨은 검색 input(#rc_select_N, opacity:0)이라 클릭 액셔너블 판정에서
+  // 탈락한다. ant-select 안의 input이거나 안 보이는 요소면 클릭 가능한 '.ant-select-selector' 박스로
+  // 재타겟한다. (드롭다운 옵션은 body로 포탈되어 .ant-select 밖이라 영향 없음)
+  function antRetarget(el){
+    if(!el || !el.closest) return el;
+    var sel=el.closest(".ant-select"); if(!sel) return el;
+    var box=sel.querySelector(".ant-select-selector"); if(!box || el===box) return el;
+    // ant-select 내부의 input(숨은 검색창)이거나 안 보이는 요소면 클릭 가능한 selector 박스로.
+    if(el.tagName==="INPUT" || !isVisible(el, false)) return box;
+    return el;
+  }
   function resolveActionable(sels, lenient){
     // rowtext(표 행 앵커)가 있으면 위치 기반 css 폴백은 제외 — 다른 페이지/정렬에서 엉뚱한 행을 고를 수 있다.
     var hasRow=false; for(var k=0;k<sels.length;k++){ if(sels[k].strategy==="rowtext"){ hasRow=true; break; } }
     for(var i=0;i<sels.length;i++){
       if(hasRow && sels[i].strategy==="css") continue;
-      var el=bySel(sels[i]);
+      var el=antRetarget(bySel(sels[i]));
       if(!el || el.disabled) continue;
       try{ el.scrollIntoView({block:"center", inline:"nearest"}); }catch(e){}
       if(isVisible(el, lenient)) return el;
@@ -547,7 +587,10 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         // 메뉴 항목(특히 hover 팝업 안)은 단순 .click()이 라우팅을 안 트리거할 수 있어 전체 이벤트로 클릭.
         var menuItem = el.closest ? el.closest(".ant-menu-item, [role=menuitem]") : null;
         var radio = isRadioLike(el) ? el : (el.querySelector ? el.querySelector('input[type=radio],input[type=checkbox]') : null);
+        // ant-select 열기/옵션 선택은 click이 아니라 mousedown에 반응 → 전체 이벤트(robustClick)로.
+        var antSel = el.closest ? el.closest(".ant-select-selector, .ant-select-item-option, .ant-select-item") : null;
         if(radio){ radio.click(); }
+        else if(antSel){ robustClick(antSel); }
         else if(menuItem){ robustClick(menuItem); }
         else { el.click(); }
       }
@@ -702,7 +745,9 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
             i=-1; continue; // for 루프가 i++ 하여 0부터 재시작
           }
         }
-        stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")+(window.__rowDiag?(" ["+window.__rowDiag+"]"):"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
+        // 진단: 셀렉터가 아예 DOM에 없는지(불안정 id 등) vs 있으나 액셔너블 아님(숨김)인지 구분.
+        var __raw=resolve(a.selectors); var __diag=__raw?("존재하나 클릭불가:"+(__raw.tagName||"")+"#"+(__raw.id||"")+"."+((__raw.className||"").toString().slice(0,30))):"DOM에 없음(셀렉터: "+(a.selectors[0]?a.selectors[0].strategy+"="+a.selectors[0].value:"")+")";
+        stepReport(i, "failed", "요소를 찾지 못함: "+(a.name||"")+" ["+__diag+"]"+(window.__rowDiag?(" ["+window.__rowDiag+"]"):"")); sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
       }
       // 사이드바 '리프' 메뉴 항목은 클릭 대신 URL로 직접 이동(접힌 사이드바 hover 팝업/호버
       // 타이밍으로 클릭이 라우팅을 못 트리거하는 문제 회피). 서브메뉴 제목(href 없음)은 제외.
