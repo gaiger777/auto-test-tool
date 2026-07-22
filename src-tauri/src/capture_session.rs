@@ -143,10 +143,11 @@ pub fn recorder_script(token: &str) -> String {
     var tid = el.getAttribute("data-testid") || el.getAttribute("data-test") || el.getAttribute("data-cy");
     if (tid) out.push({{ strategy: "testid", value: tid }});
     // ant-select: 내부 id(rc_select_N)가 불안정 → 감싼 폼 항목의 라벨 텍스트로 안정 앵커(최우선).
+    // 이 앱은 커스텀 폼 구조: .form-item > .item-label(div, <label> 아님) + .item-ant-form > .ant-select
     var antWrap = el.closest ? el.closest(".ant-select") : null;
     if (antWrap) {{
-      var fi = antWrap.closest(".ant-form-item");
-      var lbl = fi ? fi.querySelector("label") : null;
+      var fi = antWrap.closest(".form-item, .ant-form-item, .ant-form-item-row");
+      var lbl = fi ? fi.querySelector(".item-label, .ant-form-item-label, label") : null;
       var lt = lbl ? (lbl.textContent || "").replace(/\s+/g, " ").trim().replace(/[\s*:]+$/, "") : "";
       if (lt) out.push({{ strategy: "antsel", value: lt }});
     }}
@@ -448,10 +449,11 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       if(sel.strategy==="testid") return document.querySelector('[data-testid="'+sel.value+'"],[data-test="'+sel.value+'"],[data-cy="'+sel.value+'"]');
       if(sel.strategy==="id") return document.getElementById(sel.value);
       if(sel.strategy==="antsel"){ // 폼 라벨 텍스트로 ant-select를 찾아 클릭 가능한 selector 박스를 돌려준다.
-        var fis=document.querySelectorAll(".ant-form-item");
-        for(var ai=0;ai<fis.length;ai++){ var l=fis[ai].querySelector("label");
+        var fis=document.querySelectorAll(".form-item, .ant-form-item, .ant-form-item-row");
+        for(var ai=0;ai<fis.length;ai++){ var sbx=fis[ai].querySelector(".ant-select-selector"); if(!sbx&&!fis[ai].querySelector(".ant-select")) continue;
+          var l=fis[ai].querySelector(".item-label, .ant-form-item-label, label");
           var t=l?(l.textContent||"").replace(/\s+/g," ").trim().replace(/[\s*:]+$/,""):"";
-          if(t===sel.value){ var box=fis[ai].querySelector(".ant-select-selector"); if(box) return box; return fis[ai].querySelector(".ant-select")||null; } }
+          if(t===sel.value){ if(sbx) return sbx; return fis[ai].querySelector(".ant-select")||null; } }
         return null; }
       if(sel.strategy==="name"||sel.strategy==="css") return document.querySelector(sel.value);
       if(sel.strategy==="role"){ var p=sel.value.split("|"); var role=p[0], nm=(p.slice(1).join("|"));
