@@ -150,6 +150,11 @@ export default function CaptureView() {
     setUiActions([]); setReplayResults({}); setFlowName(''); setLoadedFlowId(null); setEditIdx(null); setNotice('새 시나리오 — 세션을 시작해 기록하거나 스텝을 추가하세요.')
   }
   const addStep = (a: UiAction) => { setUiActions(prev => [...prev, a]); setReplayResults({}) }
+  // file_upload 스텝에 올릴 로컬 파일을 지정한다(경로를 value에 저장 → 재생 시 그 파일을 주입).
+  const pickUploadFile = async (i: number) => {
+    const path = await open({ multiple: false, directory: false, title: '업로드할 파일 선택' })
+    if (typeof path === 'string') setUiActions(list => list.map((x, j) => (j === i ? { ...x, value: path } : x)))
+  }
   const delUi = (i: number) => { if (!window.confirm('이 동작을 삭제하시겠습니까?')) return; setUiActions(a => a.filter((_, j) => j !== i)); setReplayResults({}); setEditIdx(null) }
   const moveUi = (i: number, d: -1 | 1) => {
     const j = i + d
@@ -232,7 +237,11 @@ export default function CaptureView() {
   const loadFlow = (f: UiFlowRecord) => {
     setError(''); setNotice('')
     try {
-      setUiActions(JSON.parse(f.actions_json) as UiAction[])
+      const acts = JSON.parse(f.actions_json) as UiAction[]
+      // 녹화 세션마다 seq가 리셋돼 시나리오 간 id가 겹치면(u2,u3…) React key 충돌·순번 누수가
+      // 생긴다. 불러올 때 배열 안에서 유일한 id로 재부여하고 순번 입력 상태를 비운다.
+      setUiActions(acts.map((a, i) => ({ ...a, id: `a${i}` })))
+      setPosEdits({})
       setFlowName(f.name); setGroup(f.grp || ''); setUrl(f.site_url); setLoadedFlowId(f.id ?? null); setReplayResults({}); setEditIdx(null)
       setNotice(`"${f.name}" 불러옴 — 수정 후 DB 저장하면 덮어씁니다.`)
     } catch (e) { setError(String(e)) }
@@ -376,10 +385,16 @@ export default function CaptureView() {
                       title={a.selectors.map(s => `${s.strategy}: ${s.value}`).join('\n') || stepSummary(a)}>
                       {stepSummary(a)}
                     </td>
-                    <td><input value={a.value ?? ''} disabled={replaying}
-                      onChange={e => setUiActions(list => list.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-                      placeholder={a.kind === 'input' ? '값' : ''}
-                      style={{ width: 120, fontSize: 12, padding: '2px 4px' }} title="값 수정" /></td>
+                    <td>{a.kind === 'file_upload'
+                      ? <button disabled={replaying} onClick={() => pickUploadFile(i)}
+                          title={a.value || '올릴 로컬 파일 선택'}
+                          style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {a.value ? `📎 ${a.value.split('/').pop()}` : '📎 파일 선택'}
+                        </button>
+                      : <input value={a.value ?? ''} disabled={replaying}
+                          onChange={e => setUiActions(list => list.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                          placeholder={a.kind === 'input' ? '값' : ''}
+                          style={{ width: 120, fontSize: 12, padding: '2px 4px' }} title="값 수정" />}</td>
                     <td>{linked.length > 0
                       ? <button onClick={() => setModalCalls({ title: a.name || `동작 ${i + 1}`, calls: linked as CallLike[] })} title="유발된 네트워크 호출 보기">▸ {linked.length}</button>
                       : <span className="dim">0</span>}</td>

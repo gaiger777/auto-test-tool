@@ -65,7 +65,7 @@ export interface UiCall {
 }
 
 // UI 동작 종류: 웹뷰에서 재생하는 UI 스텝 + 흐름에 끼워넣는 프로그램 스텝.
-export type UiKind = 'click' | 'input' | 'hover' | 'http_call' | 'wait_event' | 'assert' | 'sleep' | 'tab_switch'
+export type UiKind = 'click' | 'input' | 'hover' | 'http_call' | 'wait_event' | 'assert' | 'sleep' | 'tab_switch' | 'file_upload'
 export const UI_STEP_KINDS: UiKind[] = ['click', 'input', 'hover']
 export const PROG_STEP_KINDS: UiKind[] = ['http_call', 'wait_event', 'assert', 'sleep']
 export const isProgKind = (k: UiKind) => PROG_STEP_KINDS.includes(k)

@@ -254,6 +254,15 @@ pub fn recorder_script(token: &str) -> String {
   }}, true);
   document.addEventListener("change", function(e) {{
     var el = e.target;
+    // 파일 업로드: <input type=file>는 값(경로)이 브라우저 보안상 가려져(fakepath) 재생 불가.
+    // 대신 'file_upload' 스텝으로 기록하고, 실제 올릴 파일은 시나리오에서 사용자가 지정한다(value=경로).
+    if (el && el.tagName === "INPUT" && (el.getAttribute("type") || "").toLowerCase() === "file") {{
+      var fn = (el.files && el.files[0]) ? el.files[0].name : "";
+      send({{ id: "u" + (++uiseq), kind: "file_upload", selectors: ladder(el),
+              name: "파일 업로드" + (fn ? ": " + fn : ""), value: null,
+              url: location.href, timestamp: Date.now(), tab: (window.__TABIDX__||0) }});
+      return;
+    }}
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT")) return;
     clearTimeout(__timers.get(el));
     recInput(el);
@@ -302,6 +311,11 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     const BODY: &str = r#####"(function(){
   var TOKEN = "__TOKEN__";
   var ACTIONS = __ACTIONS__;
+  // 재생 중 파일 선택 네이티브 대화상자가 뜨지 않게 한다(file_upload 스텝이 직접 파일을 주입).
+  try{ var _fc=window.HTMLInputElement.prototype.click;
+    window.HTMLInputElement.prototype.click=function(){ if((this.type||"").toLowerCase()==="file") return; return _fc.apply(this, arguments); };
+  }catch(e){}
+  try{ if(window.HTMLInputElement.prototype.showPicker) window.HTMLInputElement.prototype.showPicker=function(){}; }catch(e){}
   function inv(cmd, args){ try{ if(window.__TAURI_INTERNALS__) return window.__TAURI_INTERNALS__.invoke(cmd, args); }catch(e){} return Promise.resolve(); }
   function report(index, status, detail, done){ inv("ui_replay_step", { token: TOKEN, result: { index: index, status: status, detail: (detail||""), done: !!done } }); }
   // 스텝 보고 + '마지막으로 보고된 스텝' 기록(하드 네비게이션으로 보고가 유실됐는지 부트에서 판별).
@@ -626,6 +640,29 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         // 프론트가 대상 탭을 활성화하고 그 탭의 플레이어를 재개한다. 현재 탭 플레이어는 여기서 멈춘다.
         report(i, "delegate", JSON.stringify({ name: a.name, tabSwitch: (a.value!=null?parseInt(a.value,10):0) }));
         return;
+      }
+      if(a.kind==="file_upload"){
+        stopHover();
+        var path=a.value;
+        if(!path){ stepReport(i, "failed", "업로드 파일이 지정되지 않음: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(i+1)); continue; }
+        var inp=resolve(a.selectors);
+        // 숨겨진 파일 input일 수 있어 잠시 재시도
+        for(var fw=0; !inp && fw<10; fw++){ await sleep(300); inp=resolve(a.selectors); }
+        if(!inp){ stepReport(i, "failed", "파일 input을 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(i+1)); continue; }
+        try{
+          var fr=await inv("read_upload_file", { path: path });
+          var bin=atob(fr.b64); var arr=new Uint8Array(bin.length);
+          for(var bi=0;bi<bin.length;bi++) arr[bi]=bin.charCodeAt(bi);
+          var file=new File([arr], fr.name, { type: fr.mime||"application/octet-stream" });
+          var dt=new DataTransfer(); dt.items.add(file);
+          inp.files=dt.files;
+          inp.dispatchEvent(new Event("input", { bubbles:true }));
+          inp.dispatchEvent(new Event("change", { bubbles:true }));
+          await waitNetworkIdle(6000); await sleep(300);
+          stepReport(i, "passed", "파일 업로드: "+fr.name);
+        }catch(e){ stepReport(i, "failed", "파일 업로드 실패: "+String(e && e.message ? e.message : e)); }
+        sessionStorage.setItem("__replay_idx", String(i+1));
+        continue;
       }
       // rowtext 대상(표 안 라디오/셀 등)이면 필요 시 그 표의 페이지를 넘겨 대상 행을 찾아둔다.
       if(a.kind==="click"||a.kind==="input"){ try{ await ensureRowVisible(a.selectors); }catch(e){} }

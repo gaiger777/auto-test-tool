@@ -113,7 +113,8 @@ pub fn run() {
             commands::open_tab,
             commands::activate_tab,
             commands::close_tab,
-            commands::switch_replay_tab
+            commands::switch_replay_tab,
+            commands::read_upload_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

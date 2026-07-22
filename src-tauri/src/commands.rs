@@ -658,6 +658,53 @@ pub fn switch_replay_tab(
     Ok(())
 }
 
+/// 파일 업로드 재생용: 시나리오에 지정된 로컬 파일을 읽어 base64로 돌려준다.
+/// 재생 웹뷰(원격 origin)가 호출 → File 객체를 만들어 input.files에 주입한다.
+#[tauri::command]
+pub fn read_upload_file(path: String) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    // 웹뷰로 base64 전달 → 매우 큰 파일(대용량 이미지 등)은 메모리 폭증 위험. 상한을 둔다.
+    const MAX: u64 = 100 * 1024 * 1024; // 100MB
+    let meta = std::fs::metadata(&path).map_err(|e| format!("파일 접근 실패({path}): {e}"))?;
+    if meta.len() > MAX {
+        return Err(format!(
+            "파일이 너무 큽니다({:.1}MB > 100MB): {path}",
+            meta.len() as f64 / 1_048_576.0
+        ));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("파일 읽기 실패({path}): {e}"))?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "upload".into());
+    let mime = mime_from_ext(&name);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(serde_json::json!({ "name": name, "mime": mime, "b64": b64 }))
+}
+
+/// 확장자 기반 간단 MIME 추정(업로드 File 타입용).
+fn mime_from_ext(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "txt" | "log" => "text/plain",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "yaml" | "yml" => "application/x-yaml",
+        "iso" => "application/x-iso9660-image",
+        "qcow2" | "img" | "raw" => "application/octet-stream",
+        _ => "application/octet-stream",
+    }
+}
+
 /// 재생 창의 현재 활성 탭 웹뷰(eval 대상). tab_switch 이후 wait_event 재개 등에 사용.
 fn active_replay_webview(app: &AppHandle, state: &AppState) -> Option<tauri::Webview> {
     let win_label = app
