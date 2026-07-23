@@ -13,5 +13,5 @@
       "http://*:*"
     ]
   },
-  "permissions": ["allow-capture-push", "allow-ui-record", "allow-ui-replay-step", "allow-open-tab", "allow-read-upload-file"]
+  "permissions": ["allow-capture-push", "allow-ui-record", "allow-ui-replay-step", "allow-open-tab", "allow-read-upload-file", "allow-stat-upload-file", "allow-read-upload-file-chunk"]
 }
