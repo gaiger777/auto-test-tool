@@ -520,8 +520,11 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
   // 취약하다(스크롤에 따라 노드 재사용·재정렬, 화면 밖 옵션은 DOM에 아예 없음). 열린 드롭다운 안에서
   // 옵션을 '텍스트(녹화 이름)'로 찾고, 가상 리스트면 스크롤하며 렌더될 때까지 탐색한다.
   function scanDropdownOption(name){
-    var dds=document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden), .rc-virtual-list');
+    // '열려 있는(hidden 아님)' 드롭다운만 대상 — 닫힌 드롭다운의 잔존 옵션을 클릭하면 선택이 안 되고
+    // 가짜 성공이 된다. 옵션은 body로 포탈된 .ant-select-dropdown 안의 .rc-virtual-list에 있다.
+    var dds=document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
     for(var d=0; d<dds.length; d++){
+      if(dds[d].offsetParent===null && getComputedStyle(dds[d]).display==="none") continue;
       var opts=dds[d].querySelectorAll('.ant-select-item-option, [role=option]');
       for(var o=0; o<opts.length; o++){
         if((""+opts[o].className).indexOf("ant-select-item-option-disabled")>=0) continue;
@@ -530,6 +533,57 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
       }
     }
     return null;
+  }
+  // 선택 반영 확인: 페이지의 ant-select 표시값(.ant-select-selection-item) 중 name과 맞는 게 있으면 선택됨.
+  function antSelectHasValue(name){
+    name=(name||"").replace(/\s+/g," ").trim(); if(!name) return true;
+    var items=document.querySelectorAll('.ant-select-selection-item');
+    for(var i=0;i<items.length;i++){
+      var t=(items[i].getAttribute('title')||items[i].textContent||"").replace(/\s+/g," ").trim();
+      if(!t) continue;
+      if(t===name || t.indexOf(name)===0 || name.indexOf(t)===0) return true;
+    }
+    // 옵션 자체가 selected 표시(class/aria)된 경우도 선택으로 인정.
+    var sel=document.querySelectorAll('.ant-select-item-option-selected, .ant-select-item-option[aria-selected="true"]');
+    for(var j=0;j<sel.length;j++){
+      var st=(sel[j].getAttribute('title')||sel[j].textContent||"").replace(/\s+/g," ").trim();
+      if(st && (st===name || st.indexOf(name)===0)) return true;
+    }
+    return false;
+  }
+  // 옵션을 선택하고 '실제 반영'을 확인한다. 단순 클릭이 안 먹는 검색형(showSearch/combobox) select는
+  // 열린 select의 검색 input에 값을 입력한 뒤 옵션 재클릭/Enter 로 확정한다.
+  async function robustSelectOption(optEl, name){
+    for(var r=0;r<3;r++){          // 1) 옵션 직접 클릭 재시도
+      robustClick(optEl);
+      await sleep(220);
+      if(antSelectHasValue(name)) return true;
+      var re=await findDropdownOption(name); if(re){ optEl=re; } else break;
+    }
+    if(antSelectHasValue(name)) return true;
+    // 2) 검색 input 입력 → 필터된 옵션 클릭 / Enter
+    var open=document.querySelector('.ant-select-open');
+    if(open){
+      var si=open.querySelector('.ant-select-selection-search-input, input');
+      if(si){
+        try{ si.focus(); }catch(e){}
+        setNativeValue(si, name);
+        await sleep(300);
+        var o2=await findDropdownOption(name);
+        if(o2){ robustClick(o2); await sleep(220); if(antSelectHasValue(name)) return true; }
+        ["keydown","keyup"].forEach(function(t){ try{ si.dispatchEvent(new KeyboardEvent(t,{key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true})); }catch(e){} });
+        await sleep(280);
+      }
+    }
+    return antSelectHasValue(name);
+  }
+  // 녹화 셀렉터가 드롭다운 옵션(가상 리스트/포탈)을 가리키는지 판별 — 이런 클릭은 홀더/옵션 nth가
+  // 취약하므로 텍스트 선택+반영 검증 경로로 확정 처리한다.
+  function looksLikeOption(sels){
+    if(!sels) return false;
+    for(var i=0;i<sels.length;i++){ var v=""+(sels[i].value||"");
+      if(v.indexOf("rc-virtual-list")>=0||v.indexOf("ant-select-item")>=0||v.indexOf("ant-select-dropdown")>=0) return true; }
+    return false;
   }
   async function findDropdownOption(name){
     name=(name||"").replace(/\s+/g," ").trim();
@@ -625,7 +679,13 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         // ant-select 열기/옵션 선택은 click이 아니라 mousedown에 반응 → 전체 이벤트(robustClick)로.
         var antSel = el.closest ? el.closest(".ant-select-selector, .ant-select-item-option, .ant-select-item") : null;
         if(radio){ radio.click(); }
-        else if(antSel){ robustClick(antSel); }
+        else if(antSel){
+          // 드롭다운 '옵션' 선택이면 클릭 후 실제 반영을 검증(가짜 성공 방지). selector 박스 열기는 그대로.
+          if((""+antSel.className).indexOf("ant-select-item")>=0){
+            var ok=await robustSelectOption(antSel, a.name);
+            if(!ok) throw new Error("옵션 선택이 반영되지 않음: "+(a.name||""));
+          } else { robustClick(antSel); }
+        }
         else if(menuItem){ robustClick(menuItem); }
         else { el.click(); }
       }
@@ -764,6 +824,21 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         if(pb && pb.disabled){ await sleep(800); pb=resolve(a.selectors);
           if(pb && pb.disabled){ stepReport(i, "passed", "비활성 버튼 건너뜀: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(i+1)); continue; } }
       }
+      // ant-select 드롭다운 옵션 선택: 녹화 셀렉터가 가상 리스트 홀더/옵션 nth를 가리키면 클릭이
+      // 스크롤 컨테이너에 떨어져 '가짜 성공'이 난다. 이런 클릭은 열린 드롭다운에서 옵션을 텍스트로
+      // 골라 클릭하고 반영을 검증하는 경로로 확정 처리한다(반영 안 되면 정직하게 실패).
+      if(a.kind==="click" && a.name && looksLikeOption(a.selectors)){
+        var od=await findDropdownOption(a.name);
+        for(var dw=0; !od && dw<10; dw++){ await sleep(200); od=await findDropdownOption(a.name); } // 드롭다운 열림 대기
+        if(od && await robustSelectOption(od, a.name)){
+          stepReport(i, "passed", "옵션 선택: "+a.name);
+          sessionStorage.setItem("__replay_idx", String(i+1));
+          await waitNetworkIdle(6000); await sleep(300); continue;
+        }
+        var __od = od ? "선택 반영 실패" : "열린 드롭다운에서 옵션 미발견";
+        stepReport(i, "failed", "옵션 선택 실패: "+a.name+" ["+__od+"]");
+        sessionStorage.setItem("__replay_idx", String(ACTIONS.length)); finish("failed", "중단됨"); return;
+      }
       // 대기: 링크 클릭은 짧게(href 폴백), 호버는 짧게(실패해도 건너뜀), 그 외 넉넉히.
       var waitMs = a.kind==="hover" ? 3000 : ((a.kind==="click" && a.href) ? 3500 : 8000);
       // B) 호버 유지 중 클릭은 opacity:0/visibility:hidden 로 노출되는 대상도 통과시킨다.
@@ -780,15 +855,17 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
           stepReport(i, "passed", "호버 건너뜀(대상 미발견)");
           sessionStorage.setItem("__replay_idx", String(i+1)); continue;
         }
-        // ant-select 옵션 클릭 폴백: 가상 리스트 nth 셀렉터가 어긋났으면 열린 드롭다운에서 텍스트로 찾아 클릭.
+        // ant-select 옵션 클릭 폴백: 가상 리스트 nth 셀렉터가 어긋났으면 열린 드롭다운에서 텍스트로 찾아
+        // 클릭하고, 실제 선택 반영을 검증한다(반영돼야만 성공 처리 → 가짜 성공 방지).
         if(a.kind==="click"){
           var opt=await findDropdownOption(a.name);
           if(opt){
             try{ opt.scrollIntoView({block:"center"}); }catch(e){}
-            robustClick(opt);
-            stepReport(i, "passed", "옵션 선택(텍스트 폴백): "+(a.name||""));
-            sessionStorage.setItem("__replay_idx", String(i+1));
-            await waitNetworkIdle(6000); await sleep(300); continue;
+            if(await robustSelectOption(opt, a.name)){
+              stepReport(i, "passed", "옵션 선택(텍스트 폴백): "+(a.name||""));
+              sessionStorage.setItem("__replay_idx", String(i+1));
+              await waitNetworkIdle(6000); await sleep(300); continue;
+            }
           }
         }
         // 세션 만료/중복 로그인으로 로그인 페이지로 튕겼으면: 로그인 스텝을 재수행하고
