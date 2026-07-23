@@ -796,11 +796,16 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
           el.dispatchEvent(new KeyboardEvent("keydown",ek));
           el.dispatchEvent(new KeyboardEvent("keyup",ek)); }catch(e){} }
       }
-      // 로그인 등 제출 버튼이 간혹 안 먹는 경우: 클릭했는데 로그인 API도 안 나갔고 여전히 로그인
-      // 페이지면 한 번 더 클릭한다. (성공했으면 API가 나갔거나 페이지가 바뀌므로 재클릭하지 않음)
-      if(a.kind==="click" && /로그인|login|sign\s*in/i.test(a.name||"") && onLoginPage()){
-        var c0=(window.__net||[]).filter(function(c){ return c.ts>=netStart; });
-        if(c0.length===0){ var lb=resolve(a.selectors); if(lb && !lb.disabled){ lb.click(); await waitNetworkIdle(6000); await sleep(400); } }
+      // 로그인 등 제출 버튼이 간혹 먹통(클릭이 안 먹어 페이지 그대로): 로그인 페이지에 계속 머물러
+      // 있으면 최대 3번까지 다시 클릭한다. onLoginPage()가 false가 되면(=로그인 성공, 페이지 이동)
+      // 즉시 멈추므로, 정상 로그인 때는 재클릭하지 않는다(중복 로그인 없음).
+      if(a.kind==="click" && /로그인|login|sign\s*in/i.test(a.name||"")){
+        for(var lr=0; lr<3; lr++){
+          await sleep(600);
+          if(!onLoginPage()) break; // 로그인 성공 → 중단
+          var lb=resolve(a.selectors)||el;
+          if(lb && !lb.disabled){ robustClick(lb); await waitNetworkIdle(6000); }
+        }
       }
       // API 검증: 이 동작 이후 발생한 호출 중 4xx/5xx가 있으면 스텝 실패 표시(재생은 계속).
       var base=(a.kind==="input"?"입력: ":a.kind==="hover"?"호버: ":"클릭: ")+(a.name||"");
