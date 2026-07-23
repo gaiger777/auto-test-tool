@@ -682,6 +682,53 @@ pub fn read_upload_file(path: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "name": name, "mime": mime, "b64": b64 }))
 }
 
+/// 파일 업로드 재생용(대용량): 파일 메타(이름/MIME/크기)만 돌려준다.
+/// 실제 바이트는 read_upload_file_chunk 로 조각내어 읽어 웹뷰 메모리 폭증을 막는다.
+#[tauri::command]
+pub fn stat_upload_file(path: String) -> Result<serde_json::Value, String> {
+    // 대용량(수백 MB~GB) VM 이미지 등도 허용. 상식 밖 크기만 막는다.
+    const MAX: u64 = 4 * 1024 * 1024 * 1024; // 4GB
+    let meta = std::fs::metadata(&path).map_err(|e| format!("파일 접근 실패({path}): {e}"))?;
+    if meta.len() > MAX {
+        return Err(format!(
+            "파일이 너무 큽니다({:.1}GB > 4GB): {path}",
+            meta.len() as f64 / 1_073_741_824.0
+        ));
+    }
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "upload".into());
+    let mime = mime_from_ext(&name);
+    Ok(serde_json::json!({ "name": name, "mime": mime, "size": meta.len() }))
+}
+
+/// 파일의 [offset, offset+len) 구간만 읽어 base64로 돌려준다(대용량 업로드 청크 전송).
+#[tauri::command]
+pub fn read_upload_file_chunk(path: String, offset: u64, len: u64) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_CHUNK: u64 = 16 * 1024 * 1024; // 한 조각 상한 16MB
+    let len = len.min(MAX_CHUNK);
+    let mut f = std::fs::File::open(&path).map_err(|e| format!("파일 열기 실패({path}): {e}"))?;
+    f.seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("파일 탐색 실패({path}@{offset}): {e}"))?;
+    let mut buf = vec![0u8; len as usize];
+    let mut read = 0usize;
+    while read < buf.len() {
+        let n = f
+            .read(&mut buf[read..])
+            .map_err(|e| format!("파일 읽기 실패({path}@{offset}): {e}"))?;
+        if n == 0 {
+            break; // EOF
+        }
+        read += n;
+    }
+    buf.truncate(read);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
+    Ok(serde_json::json!({ "b64": b64, "read": read }))
+}
+
 /// 확장자 기반 간단 MIME 추정(업로드 File 타입용).
 fn mime_from_ext(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();

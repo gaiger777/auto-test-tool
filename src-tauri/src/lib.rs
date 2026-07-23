@@ -114,7 +114,9 @@ pub fn run() {
             commands::activate_tab,
             commands::close_tab,
             commands::switch_replay_tab,
-            commands::read_upload_file
+            commands::read_upload_file,
+            commands::stat_upload_file,
+            commands::read_upload_file_chunk
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

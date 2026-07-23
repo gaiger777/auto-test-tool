@@ -516,6 +516,39 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
     if(el.tagName==="INPUT" || !isVisible(el, false)) return box;
     return el;
   }
+  // ant-select 드롭다운 옵션은 body로 포탈되고 가상 스크롤(rc-virtual-list)이라 nth-child 셀렉터가
+  // 취약하다(스크롤에 따라 노드 재사용·재정렬, 화면 밖 옵션은 DOM에 아예 없음). 열린 드롭다운 안에서
+  // 옵션을 '텍스트(녹화 이름)'로 찾고, 가상 리스트면 스크롤하며 렌더될 때까지 탐색한다.
+  function scanDropdownOption(name){
+    var dds=document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden), .rc-virtual-list');
+    for(var d=0; d<dds.length; d++){
+      var opts=dds[d].querySelectorAll('.ant-select-item-option, [role=option]');
+      for(var o=0; o<opts.length; o++){
+        if((""+opts[o].className).indexOf("ant-select-item-option-disabled")>=0) continue;
+        var t=(opts[o].getAttribute('title')||opts[o].textContent||"").replace(/\s+/g," ").trim();
+        if(t===name || (t && name && t.indexOf(name)===0)) return opts[o];
+      }
+    }
+    return null;
+  }
+  async function findDropdownOption(name){
+    name=(name||"").replace(/\s+/g," ").trim();
+    if(!name) return null;
+    var el=scanDropdownOption(name); if(el) return el;
+    // 가상 스크롤: holder를 위→아래로 훑으며 옵션이 렌더되길 기다린다.
+    var holders=document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .rc-virtual-list-holder, .rc-virtual-list-holder');
+    for(var h=0; h<holders.length; h++){
+      var hd=holders[h]; if(!hd.scrollHeight || !hd.clientHeight) continue;
+      hd.scrollTop=0; await sleep(60);
+      var step=Math.max(80, hd.clientHeight-40);
+      for(var s=0; ; s+=step){
+        hd.scrollTop=s; await sleep(60);
+        el=scanDropdownOption(name); if(el) return el;
+        if(s>=hd.scrollHeight-hd.clientHeight) break;
+      }
+    }
+    return scanDropdownOption(name);
+  }
   function resolveActionable(sels, lenient){
     // rowtext(표 행 앵커)가 있으면 위치 기반 css 폴백은 제외 — 다른 페이지/정렬에서 엉뚱한 행을 고를 수 있다.
     var hasRow=false; for(var k=0;k<sels.length;k++){ if(sels[k].strategy==="rowtext"){ hasRow=true; break; } }
@@ -693,18 +726,31 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         var inp=resolve(a.selectors);
         // 숨겨진 파일 input일 수 있어 잠시 재시도
         for(var fw=0; !inp && fw<10; fw++){ await sleep(300); inp=resolve(a.selectors); }
+        // 녹화 셀렉터가 안 잡히면(ant-upload의 숨은 input은 id가 불안정) 페이지의 file input으로 폴백.
+        if(!inp){ inp = document.querySelector(".ant-upload input[type=file], .ant-upload-select input[type=file]")
+          || (function(){ var fs=document.querySelectorAll('input[type=file]'); return fs[fs.length-1]||null; })(); }
         if(!inp){ stepReport(i, "failed", "파일 input을 찾지 못함: "+(a.name||"")); sessionStorage.setItem("__replay_idx", String(i+1)); continue; }
         try{
-          var fr=await inv("read_upload_file", { path: path });
-          var bin=atob(fr.b64); var arr=new Uint8Array(bin.length);
-          for(var bi=0;bi<bin.length;bi++) arr[bi]=bin.charCodeAt(bi);
-          var file=new File([arr], fr.name, { type: fr.mime||"application/octet-stream" });
+          // 대용량 파일(수백 MB 이미지 등)은 통짜 base64가 웹뷰 메모리를 폭증시키므로 청크로 나눠 읽어
+          // Blob 파트 배열로 조립한다(한 조각의 base64/atob만 순간 점유 → 최대 메모리 유계).
+          var st=await inv("stat_upload_file", { path: path });
+          var total=st.size||0, CH=8*1024*1024, parts=[];
+          for(var off=0; off<total; off+=CH){
+            var want=Math.min(CH, total-off);
+            var ck=await inv("read_upload_file_chunk", { path: path, offset: off, len: want });
+            var bin=atob(ck.b64); var arr=new Uint8Array(bin.length);
+            for(var bi=0;bi<bin.length;bi++) arr[bi]=bin.charCodeAt(bi);
+            parts.push(arr);
+            if(!ck.read || ck.read<want) break; // EOF
+          }
+          var file=new File(parts, st.name, { type: st.mime||"application/octet-stream" });
           var dt=new DataTransfer(); dt.items.add(file);
           inp.files=dt.files;
           inp.dispatchEvent(new Event("input", { bubbles:true }));
           inp.dispatchEvent(new Event("change", { bubbles:true }));
-          await waitNetworkIdle(6000); await sleep(300);
-          stepReport(i, "passed", "파일 업로드: "+fr.name);
+          // 대용량 업로드는 네트워크가 오래 걸릴 수 있어 대기 상한을 넉넉히.
+          await waitNetworkIdle(60000); await sleep(300);
+          stepReport(i, "passed", "파일 업로드: "+st.name+" ("+(total/1048576).toFixed(1)+"MB)");
         }catch(e){ stepReport(i, "failed", "파일 업로드 실패: "+String(e && e.message ? e.message : e)); }
         sessionStorage.setItem("__replay_idx", String(i+1));
         continue;
@@ -733,6 +779,17 @@ pub fn player_script(token: &str, actions_json: &str) -> String {
         if(a.kind==="hover"){ // 호버는 보조 단계 → 실패해도 다음 스텝 진행
           stepReport(i, "passed", "호버 건너뜀(대상 미발견)");
           sessionStorage.setItem("__replay_idx", String(i+1)); continue;
+        }
+        // ant-select 옵션 클릭 폴백: 가상 리스트 nth 셀렉터가 어긋났으면 열린 드롭다운에서 텍스트로 찾아 클릭.
+        if(a.kind==="click"){
+          var opt=await findDropdownOption(a.name);
+          if(opt){
+            try{ opt.scrollIntoView({block:"center"}); }catch(e){}
+            robustClick(opt);
+            stepReport(i, "passed", "옵션 선택(텍스트 폴백): "+(a.name||""));
+            sessionStorage.setItem("__replay_idx", String(i+1));
+            await waitNetworkIdle(6000); await sleep(300); continue;
+          }
         }
         // 세션 만료/중복 로그인으로 로그인 페이지로 튕겼으면: 로그인 스텝을 재수행하고
         // 현재 시나리오를 처음부터 다시 실행(재로그인 후 네비게이션 복구). '첫 시나리오=로그인' 가정.
